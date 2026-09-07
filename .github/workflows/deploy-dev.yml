@@ -1,26 +1,102 @@
-- name: Deploy to DEV VPS
-  uses: appleboy/ssh-action@v1.2.2
-  with:
-    host: ${{ secrets.DEV_HOST }}
-    username: ${{ secrets.DEV_USER }}
-    key: ${{ secrets.DEV_SSH_KEY }}
-    port: 1256
-    script: |
-      set -e
+name: Deploy DEV
 
-      cd /opt/myproject
+on:
+  workflow_run:
+    workflows:
+      - Docker
+    types:
+      - completed
+    branches:
+      - main
 
-      export APP_IMAGE=ghcr.io/kamalidariush/mylaravel:${{ github.sha }}
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
-      echo "Deploying image:"
-      echo "$APP_IMAGE"
+    runs-on: ubuntu-latest
 
-      docker compose pull
+    steps:
+      - name: Checkout deployed commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
-      docker compose up -d
+      - name: Prepare deployment directory
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: 1256
+          script: |
+            set -e
 
-      docker compose run --rm app php artisan migrate --force
+            mkdir -p /opt/myproject/docker/nginx
 
-      docker compose exec -T app php artisan optimize
+      - name: Upload Docker Compose
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: 1256
+          source: "docker-compose.yml"
+          target: "/opt/myproject"
 
-      docker compose ps
+      - name: Upload Nginx config
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: 1256
+          source: "docker/nginx/default.conf"
+          target: "/opt/myproject/docker/nginx"
+
+      - name: Deploy to DEV VPS
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: 1256
+
+          script: |
+            set -e
+
+            cd /opt/myproject
+
+            export APP_IMAGE=ghcr.io/kamalidariush/mylaravel:${{ github.event.workflow_run.head_sha }}
+
+            echo "======================================"
+            echo "Deploying to DEV"
+            echo "======================================"
+            echo "Commit:"
+            echo "${{ github.event.workflow_run.head_sha }}"
+            echo ""
+            echo "Docker Image:"
+            echo "$APP_IMAGE"
+            echo "======================================"
+
+            echo "Checking Docker..."
+            docker --version
+            docker compose version
+
+            echo "Pulling application image..."
+            docker compose pull
+
+            echo "Starting services..."
+            docker compose up -d
+
+            echo "Running database migrations..."
+            docker compose run --rm app php artisan migrate --force
+
+            echo "Optimizing Laravel..."
+            docker compose exec -T app php artisan optimize
+
+            echo "Checking containers..."
+            docker compose ps
+
+            echo "======================================"
+            echo "DEV deployment completed successfully."
+            echo "======================================"
