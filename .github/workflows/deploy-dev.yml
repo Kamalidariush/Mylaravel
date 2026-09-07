@@ -1,0 +1,21 @@
+name: Deploy DEV
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to DEV VPS
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: 1256
+          script: |
+            echo "Connected to DEV VPS"
+            docker --version
+            docker compose version
