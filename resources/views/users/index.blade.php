@@ -27,6 +27,7 @@
 
                     {{-- Header --}}
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+
                         <h1 style="font-size:24px; font-weight:700;">
                             Users List
                         </h1>
@@ -37,22 +38,26 @@
                         >
                             + ایجاد کاربر
                         </a>
+
                     </div>
 
                     {{-- Users --}}
                     <div style="border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;">
 
                         {{-- Table Header --}}
-                        <div style="display:grid; grid-template-columns:2fr 3fr 1fr 3fr; padding:12px 16px; background:#f3f4f6; font-weight:600;">
+                        <div style="display:grid; grid-template-columns:2fr 3fr 1fr 2fr 4fr; padding:12px 16px; background:#f3f4f6; font-weight:600;">
+
                             <div>Name</div>
                             <div>Email</div>
                             <div>Role</div>
+                            <div>File</div>
                             <div>Actions</div>
+
                         </div>
 
                         @foreach ($users as $user)
 
-                            <div style="display:grid; grid-template-columns:2fr 3fr 1fr 3fr; align-items:center; padding:14px 16px; border-top:1px solid #e5e7eb;">
+                            <div style="display:grid; grid-template-columns:2fr 3fr 1fr 2fr 4fr; align-items:center; padding:14px 16px; border-top:1px solid #e5e7eb;">
 
                                 {{-- Name --}}
                                 <div>
@@ -67,14 +72,40 @@
                                 {{-- Role --}}
                                 <div>
                                     @if ($user->role === 'admin')
+
                                         <span style="background:#dbeafe; color:#1e40af; padding:4px 8px; border-radius:5px; font-size:13px;">
                                             Admin
                                         </span>
+
                                     @else
+
                                         <span style="background:#f3f4f6; color:#374151; padding:4px 8px; border-radius:5px; font-size:13px;">
                                             User
                                         </span>
+
                                     @endif
+                                </div>
+
+                                {{-- File --}}
+                                <div>
+
+                                    @if ($user->file_path)
+
+                                        <a
+                                            href="{{ route('users.file', $user) }}"
+                                            style="color:#2563eb; text-decoration:none;"
+                                        >
+                                            Download
+                                        </a>
+
+                                    @else
+
+                                        <span style="color:#9ca3af; font-size:14px;">
+                                            No file
+                                        </span>
+
+                                    @endif
+
                                 </div>
 
                                 {{-- Actions --}}
@@ -100,6 +131,7 @@
                                         style="display:inline;"
                                         onsubmit="return confirm('Are you sure you want to delete this user?');"
                                     >
+
                                         @csrf
                                         @method('DELETE')
 
@@ -109,6 +141,7 @@
                                         >
                                             Delete
                                         </button>
+
                                     </form>
 
                                 </div>

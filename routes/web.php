@@ -8,6 +8,9 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+Route::get('/users/{user}/file', [UserController::class, 'downloadFile'])
+    ->name('users.file');
+
 Route::get('/dashboard', function () {
     return view('dashboard');
 })->middleware(['auth', 'verified'])->name('dashboard');
