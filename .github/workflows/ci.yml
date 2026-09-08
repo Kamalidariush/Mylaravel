@@ -256,6 +256,36 @@ jobs:
             docker compose up -d
 
             echo "======================================"
+            echo "Checking APP_KEY..."
+            echo "======================================"
+
+            CURRENT_APP_KEY=$(grep '^APP_KEY=' .env | cut -d '=' -f2- || true)
+
+            if [ -z "$CURRENT_APP_KEY" ]; then
+
+              echo "APP_KEY is empty."
+              echo "Generating new APP_KEY..."
+
+              NEW_APP_KEY=$(docker compose run --rm app php artisan key:generate --show)
+
+              sed -i "s|^APP_KEY=.*|APP_KEY=$NEW_APP_KEY|" .env
+
+              echo "APP_KEY generated and saved."
+
+            else
+
+              echo "APP_KEY already exists."
+              echo "Keeping existing APP_KEY."
+
+            fi
+
+            echo "======================================"
+            echo "Restarting application..."
+            echo "======================================"
+
+            docker compose up -d
+
+            echo "======================================"
             echo "Running migrations..."
             echo "======================================"
 
