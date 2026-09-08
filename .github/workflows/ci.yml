@@ -112,7 +112,6 @@ jobs:
     name: Docker Build
     needs: test
 
-    # فقط بعد از push/merge به main
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     runs-on: ubuntu-latest
@@ -225,6 +224,8 @@ jobs:
             # Exact Docker image for this commit
             export APP_IMAGE=ghcr.io/kamalidariush/mylaravel:${{ github.sha }}
 
+            COMPOSE="docker compose -f docker-compose.dev.yml"
+
             echo "======================================"
             echo "DEV DEPLOYMENT"
             echo "======================================"
@@ -244,16 +245,26 @@ jobs:
             docker compose version
 
             echo "======================================"
+            echo "Checking deployment files..."
+            echo "======================================"
+
+            test -f docker-compose.dev.yml
+            test -f .env
+            test -f docker/nginx/default.conf
+
+            echo "Deployment files OK."
+
+            echo "======================================"
+            echo "Validating Docker Compose..."
+            echo "======================================"
+
+            $COMPOSE config
+
+            echo "======================================"
             echo "Pulling images..."
             echo "======================================"
 
-            docker compose pull
-
-            echo "======================================"
-            echo "Starting services..."
-            echo "======================================"
-
-            docker compose up -d
+            $COMPOSE pull
 
             echo "======================================"
             echo "Checking APP_KEY..."
@@ -266,7 +277,12 @@ jobs:
               echo "APP_KEY is empty."
               echo "Generating new APP_KEY..."
 
-              NEW_APP_KEY=$(docker compose run --rm app php artisan key:generate --show)
+              NEW_APP_KEY=$(
+                docker run --rm \
+                  --entrypoint php \
+                  "$APP_IMAGE" \
+                  artisan key:generate --show
+              )
 
               sed -i "s|^APP_KEY=.*|APP_KEY=$NEW_APP_KEY|" .env
 
@@ -280,28 +296,28 @@ jobs:
             fi
 
             echo "======================================"
-            echo "Restarting application..."
+            echo "Starting services..."
             echo "======================================"
 
-            docker compose up -d
+            $COMPOSE up -d --remove-orphans
 
             echo "======================================"
             echo "Running migrations..."
             echo "======================================"
 
-            docker compose run --rm app php artisan migrate --force
+            $COMPOSE run --rm app php artisan migrate --force
 
             echo "======================================"
             echo "Optimizing Laravel..."
             echo "======================================"
 
-            docker compose exec -T app php artisan optimize
+            $COMPOSE exec -T app php artisan optimize
 
             echo "======================================"
             echo "Container status..."
             echo "======================================"
 
-            docker compose ps
+            $COMPOSE ps
 
             echo "======================================"
             echo "DEV DEPLOYMENT COMPLETED"
