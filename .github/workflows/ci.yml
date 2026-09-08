@@ -202,7 +202,7 @@ jobs:
           port: 1256
 
           source: "docker/nginx/default.conf"
-          target: "/opt/myproject/docker/nginx"
+          target: "/opt/myproject"
 
 
       # ----------------------------------------------
