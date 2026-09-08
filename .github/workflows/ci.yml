@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   pull_request:
@@ -9,8 +9,17 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  tests:
+
+  # ==================================================
+  # 1. TEST
+  # ==================================================
+  test:
+    name: Tests
     runs-on: ubuntu-latest
 
     services:
@@ -39,6 +48,7 @@ jobs:
           --health-retries=5
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -93,3 +103,206 @@ jobs:
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: 6379
         run: php artisan test
+
+
+  # ==================================================
+  # 2. BUILD DOCKER IMAGE + PUSH GHCR
+  # ==================================================
+  build:
+    name: Docker Build
+    needs: test
+
+    # فقط بعد از push/merge به main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/kamalidariush/mylaravel:${{ github.sha }}
+            ghcr.io/kamalidariush/mylaravel:latest
+
+
+  # ==================================================
+  # 3. DEPLOY TO DEV VPS
+  # ==================================================
+  deploy:
+    name: Deploy DEV
+    needs: build
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ----------------------------------------------
+      # Checkout exact commit
+      # ----------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      # ----------------------------------------------
+      # Prepare VPS directories
+      # ----------------------------------------------
+      - name: Prepare deployment directory
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: 1256
+
+          script: |
+            set -e
+
+            mkdir -p /opt/myproject/docker/nginx
+
+
+      # ----------------------------------------------
+      # Upload Docker Compose
+      # ----------------------------------------------
+      - name: Upload Docker Compose
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: 1256
+
+          source: "docker-compose.yml"
+          target: "/opt/myproject"
+
+
+      # ----------------------------------------------
+      # Upload Nginx configuration
+      # ----------------------------------------------
+      - name: Upload Nginx config
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: 1256
+
+          source: "docker/nginx/default.conf"
+          target: "/opt/myproject/docker/nginx"
+
+
+      # ----------------------------------------------
+      # Deploy
+      # ----------------------------------------------
+      - name: Deploy to DEV VPS
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: 1256
+
+          script: |
+            set -e
+
+            cd /opt/myproject
+
+            # Exact Docker image for this commit
+            export APP_IMAGE=ghcr.io/kamalidariush/mylaravel:${{ github.sha }}
+
+            echo "======================================"
+            echo "DEV DEPLOYMENT"
+            echo "======================================"
+
+            echo "Commit:"
+            echo "${{ github.sha }}"
+
+            echo "Docker Image:"
+            echo "$APP_IMAGE"
+
+            echo "======================================"
+
+            echo "Docker version:"
+            docker --version
+
+            echo "Docker Compose version:"
+            docker compose version
+
+            echo "======================================"
+            echo "Pulling images..."
+            echo "======================================"
+
+            docker compose pull
+
+            echo "======================================"
+            echo "Starting services..."
+            echo "======================================"
+
+            docker compose up -d
+
+            echo "======================================"
+            echo "Checking APP_KEY..."
+            echo "======================================"
+
+            CURRENT_APP_KEY=$(grep '^APP_KEY=' .env | cut -d '=' -f2- || true)
+
+            if [ -z "$CURRENT_APP_KEY" ]; then
+
+              echo "APP_KEY is empty."
+              echo "Generating new APP_KEY..."
+
+              NEW_APP_KEY=$(docker compose run --rm app php artisan key:generate --show)
+
+              sed -i "s|^APP_KEY=.*|APP_KEY=$NEW_APP_KEY|" .env
+
+              echo "APP_KEY generated and saved."
+
+            else
+
+              echo "APP_KEY already exists."
+              echo "Keeping existing APP_KEY."
+
+            fi
+
+            echo "======================================"
+            echo "Restarting application..."
+            echo "======================================"
+
+            docker compose up -d
+
+            echo "======================================"
+            echo "Running migrations..."
+            echo "======================================"
+
+            docker compose run --rm app php artisan migrate --force
+
+            echo "======================================"
+            echo "Optimizing Laravel..."
+            echo "======================================"
+
+            docker compose exec -T app php artisan optimize
+
+            echo "======================================"
+            echo "Container status..."
+            echo "======================================"
+
+            docker compose ps
+
+            echo "======================================"
+            echo "DEV DEPLOYMENT COMPLETED"
+            echo "======================================"
