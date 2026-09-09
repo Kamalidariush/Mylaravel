@@ -15,22 +15,33 @@ RUN apt-get update && apt-get install -y \
     pgsql \
     bcmath \
     zip \
+    mbstring \
+    && pecl install redis \
+    && docker-php-ext-enable redis \
     && rm -rf /var/lib/apt/lists/*
 
 # Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Copy Laravel project
+# Application source
 COPY . .
 
 # Install PHP dependencies
 RUN composer install \
     --no-interaction \
     --prefer-dist \
-    --optimize-autoloader
+    --optimize-autoloader \
+    --no-dev
 
-# Permissions
-RUN chown -R www-data:www-data storage bootstrap/cache
+# Laravel writable directories
+RUN mkdir -p \
+    storage/app/private \
+    storage/framework/cache \
+    storage/framework/sessions \
+    storage/framework/views \
+    storage/logs \
+    bootstrap/cache \
+    && chown -R www-data:www-data storage bootstrap/cache
 
 EXPOSE 9000
 
