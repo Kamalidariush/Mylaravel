@@ -3,6 +3,8 @@
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Redis;
 
 Route::get('/', function () {
     return view('welcome');
@@ -24,17 +26,38 @@ Route::middleware('auth')->group(function () {
 });
 
 
-// User Management - Admin Only
-Route::middleware(['auth', 'admin'])->group(function () {
+// Health Checks
 
-    Route::resource('users', UserController::class);
-
-    Route::get('/users/{user}/reset-password', [UserController::class, 'showResetPassword'])
-        ->name('users.reset-password.form');
-
-    Route::post('/users/{user}/reset-password', [UserController::class, 'resetPassword'])
-        ->name('users.reset-password');
+Route::get('/health/live', function () {
+    return response()->json([
+        'status' => 'ok',
+    ], 200);
 });
 
+Route::get('/health/ready', function () {
+    $checks = [
+        'database' => false,
+        'redis' => false,
+    ];
 
-require __DIR__.'/auth.php';
+    try {
+        DB::connection()->getPdo();
+        $checks['database'] = true;
+    } catch (\Throwable $e) {
+        // Database is not ready.
+    }
+
+    try {
+        Redis::connection()->ping();
+        $checks['redis'] = true;
+    } catch (\Throwable $e) {
+        // Redis is not ready.
+    }
+
+    $ready = $checks['database'] && $checks['redis'];
+
+    return response()->json([
+        'status' => $ready ? 'ok' : 'not_ready',
+        'checks' => $checks,
+    ], $ready ? 200 : 503);
+});
