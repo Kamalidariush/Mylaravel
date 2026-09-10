@@ -17,9 +17,19 @@ Route::get('/dashboard', function () {
 
 // Users
 Route::middleware(['auth', 'admin'])->group(function () {
+
     Route::resource('users', UserController::class);
+
+    // Reset Password
+    Route::get('/users/{user}/reset-password', [UserController::class, 'showResetPassword'])
+        ->name('users.reset-password.form');
+
+    Route::put('/users/{user}/reset-password', [UserController::class, 'resetPassword'])
+        ->name('users.reset-password');
 });
 
+
+// Private User File
 Route::get('/users/{user}/file', [UserController::class, 'downloadFile'])
     ->middleware(['auth', 'admin'])
     ->name('users.file');
@@ -27,6 +37,7 @@ Route::get('/users/{user}/file', [UserController::class, 'downloadFile'])
 
 // Profile
 Route::middleware('auth')->group(function () {
+
     Route::get('/profile', [ProfileController::class, 'edit'])
         ->name('profile.edit');
 
