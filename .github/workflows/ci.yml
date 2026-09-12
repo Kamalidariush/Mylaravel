@@ -352,7 +352,7 @@ jobs:
 
                 if curl -fsS \
                   --max-time 5 \
-                  http://127.0.0.1/health/ready-test \
+                  http://127.0.0.1/health/ready \
                   > /tmp/health_ready.json
                 then
 
