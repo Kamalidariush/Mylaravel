@@ -1,14 +1,193 @@
-  deploy:
-    name: Deploy to VPS
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+name: CI/CD
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+
+jobs:
+
+  # =========================================================
+  # TEST
+  # =========================================================
+  test:
+    name: Test Laravel
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: myproject_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d myproject_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=5
+
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Copy compose file to VPS
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo_pgsql, pgsql, bcmath, zip
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build
+
+      - name: Prepare environment
+        run: cp .env.example .env
+
+      - name: Generate application key
+        run: php artisan key:generate
+
+      - name: Run migrations
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: myproject_test
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+        run: php artisan migrate --force
+
+      - name: Run tests
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: myproject_test
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+        run: php artisan test
+
+
+  # =========================================================
+  # BUILD
+  # =========================================================
+  build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+
+    needs:
+      - test
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Laravel image
+        run: |
+          docker build \
+            -t ghcr.io/kamalidariush/mylaravel:${{ github.sha }} \
+            -t ghcr.io/kamalidariush/mylaravel:latest \
+            -f Dockerfile .
+
+      - name: Build Nginx image
+        run: |
+          docker build \
+            -t ghcr.io/kamalidariush/mylaravel-nginx:${{ github.sha }} \
+            -t ghcr.io/kamalidariush/mylaravel-nginx:latest \
+            -f Dockerfile.nginx .
+
+      - name: Push Laravel image
+        run: |
+          docker push ghcr.io/kamalidariush/mylaravel:${{ github.sha }}
+          docker push ghcr.io/kamalidariush/mylaravel:latest
+
+      - name: Push Nginx image
+        run: |
+          docker push ghcr.io/kamalidariush/mylaravel-nginx:${{ github.sha }}
+          docker push ghcr.io/kamalidariush/mylaravel-nginx:latest
+
+
+  # =========================================================
+  # DEPLOY DEV
+  # =========================================================
+  deploy:
+    name: Deploy to DEV
+    runs-on: ubuntu-latest
+
+    needs:
+      - build
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # -------------------------------------------------------
+      # Upload docker-compose
+      # -------------------------------------------------------
+      - name: Upload docker-compose.dev.yml
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DEV_HOST }}
@@ -18,316 +197,517 @@
           source: "docker-compose.dev.yml"
           target: "/opt/myproject"
 
+      # -------------------------------------------------------
+      # Deploy
+      # -------------------------------------------------------
       - name: Deploy
-        uses: appleboy/ssh-action@v1.2.2
+        uses: appleboy/ssh-action@v1.2.0
+
         env:
           APP_IMAGE: ghcr.io/kamalidariush/mylaravel:${{ github.sha }}
           NGINX_IMAGE: ghcr.io/kamalidariush/mylaravel-nginx:${{ github.sha }}
+
         with:
           host: ${{ secrets.DEV_HOST }}
           username: ${{ secrets.DEV_USER }}
           key: ${{ secrets.DEV_SSH_KEY }}
           port: 1256
           envs: APP_IMAGE,NGINX_IMAGE
+
           script: |
             set -Eeuo pipefail
 
             cd /opt/myproject
 
-            COMPOSE="docker compose -f docker-compose.dev.yml"
+            echo "======================================"
+            echo "Deploying commit: ${{ github.sha }}"
+            echo "======================================"
 
-            echo "========================================"
-            echo "Starting deployment"
-            echo "APP_IMAGE=$APP_IMAGE"
-            echo "NGINX_IMAGE=$NGINX_IMAGE"
-            echo "========================================"
+            # -------------------------------------------------
+            # Environment
+            # -------------------------------------------------
 
             if [ ! -f .env ]; then
               echo "ERROR: /opt/myproject/.env not found"
               exit 1
             fi
 
-            export APP_IMAGE
-            export NGINX_IMAGE
+            # -------------------------------------------------
+            # Create deploy.env
+            # -------------------------------------------------
 
-            echo "Checking compose configuration..."
-            $COMPOSE config -q
+            cat > deploy.env <<EOF
+            APP_IMAGE=$APP_IMAGE
+            NGINX_IMAGE=$NGINX_IMAGE
+            EOF
 
-            # --------------------------------------------------
-            # Save currently running deployment
-            # --------------------------------------------------
+            chmod 600 deploy.env
 
-            PREVIOUS_APP_IMAGE=""
-            PREVIOUS_NGINX_IMAGE=""
+            echo "deploy.env created."
 
-            if docker inspect myproject-app-1 >/dev/null 2>&1; then
-              PREVIOUS_APP_IMAGE=$(
-                docker inspect \
-                  --format='{{.Config.Image}}' \
-                  myproject-app-1
-              )
+            # -------------------------------------------------
+            # Compose command
+            # -------------------------------------------------
+
+            COMPOSE="docker compose --env-file ./deploy.env -f docker-compose.dev.yml"
+
+            # -------------------------------------------------
+            # Validate compose
+            # -------------------------------------------------
+
+            echo "Validating Docker Compose..."
+
+            if ! $COMPOSE config -q; then
+              echo "ERROR: Docker Compose configuration is invalid."
+              exit 1
             fi
 
-            if docker inspect myproject-nginx-1 >/dev/null 2>&1; then
-              PREVIOUS_NGINX_IMAGE=$(
-                docker inspect \
-                  --format='{{.Config.Image}}' \
-                  myproject-nginx-1
-              )
-            fi
+            # -------------------------------------------------
+            # Detect current deployment
+            # -------------------------------------------------
+
+            echo "Detecting current deployment..."
+
+            PREVIOUS_APP_IMAGE=$(
+              docker inspect \
+                --format='{{.Config.Image}}' \
+                myproject-app-1 2>/dev/null || true
+            )
+
+            PREVIOUS_NGINX_IMAGE=$(
+              docker inspect \
+                --format='{{.Config.Image}}' \
+                myproject-nginx-1 2>/dev/null || true
+            )
 
             if [ -n "$PREVIOUS_APP_IMAGE" ] && [ -n "$PREVIOUS_NGINX_IMAGE" ]; then
+
+              echo "Previous application image:"
+              echo "$PREVIOUS_APP_IMAGE"
+
+              echo "Previous nginx image:"
+              echo "$PREVIOUS_NGINX_IMAGE"
+
               cat > .previous_deployment <<EOF
             APP_IMAGE=$PREVIOUS_APP_IMAGE
             NGINX_IMAGE=$PREVIOUS_NGINX_IMAGE
             EOF
 
-              echo "Previous deployment saved:"
-              cat .previous_deployment
+              echo "Previous deployment saved."
+
             else
-              echo "No previous deployment found."
+
+              echo "No previous deployment detected."
+
               rm -f .previous_deployment
+
             fi
 
-            # --------------------------------------------------
-            # Health check function
-            # --------------------------------------------------
+            # =================================================
+            # HEALTH CHECK FUNCTION
+            # =================================================
 
             health_check() {
-              echo "Checking application health..."
+
+              local PREFIX="${1:-Health}"
+
+              echo ""
+              echo "======================================"
+              echo "$PREFIX CHECK"
+              echo "======================================"
 
               for i in $(seq 1 30); do
 
-                if curl -fsS \
-                  --max-time 5 \
-                  http://127.0.0.1/health/live >/dev/null 2>&1; then
+                echo ""
+                echo "$PREFIX attempt $i/30"
 
-                  echo "Liveness check: OK"
-                  break
-                fi
+                # ---------------------------------------------
+                # LIVENESS
+                # ---------------------------------------------
 
-                echo "Liveness check failed. Attempt $i/30"
-                sleep 2
-
-                if [ "$i" -eq 30 ]; then
-                  echo "Liveness check FAILED"
-                  return 1
-                fi
-              done
-
-              for i in $(seq 1 30); do
+                echo "Checking Liveness..."
 
                 if curl -fsS \
                   --max-time 5 \
-                  http://127.0.0.1/health/ready >/dev/null 2>&1; then
+                  http://127.0.0.1/health/live \
+                  > /tmp/health_live.json
+                then
 
-                  echo "Readiness check: OK"
-                  break
+                  echo "Liveness: OK"
+
+                else
+
+                  echo "Liveness: FAILED"
+
+                  sleep 2
+                  continue
+
                 fi
 
-                echo "Readiness check failed. Attempt $i/30"
-                sleep 2
+                # ---------------------------------------------
+                # READINESS
+                # ---------------------------------------------
 
-                if [ "$i" -eq 30 ]; then
-                  echo "Readiness check FAILED"
-                  return 1
+                echo "Checking Readiness..."
+
+                if curl -fsS \
+                  --max-time 5 \
+                  http://127.0.0.1/health/ready \
+                  > /tmp/health_ready.json
+                then
+
+                  echo "Readiness: OK"
+
+                  cat /tmp/health_ready.json
+                  echo
+
+                  return 0
+
+                else
+
+                  echo "Readiness: FAILED"
+
+                  sleep 2
+
                 fi
+
               done
 
-              echo "Health checks passed."
-              return 0
+              return 1
             }
 
-            # --------------------------------------------------
-            # Automatic rollback function
-            # --------------------------------------------------
+            # =================================================
+            # AUTOMATIC ROLLBACK FUNCTION
+            # =================================================
 
             rollback() {
 
               echo ""
-              echo "========================================"
+              echo "======================================"
               echo "AUTOMATIC ROLLBACK"
-              echo "========================================"
+              echo "======================================"
 
               if [ ! -f .previous_deployment ]; then
+
                 echo "No previous deployment available."
-                echo "Rollback cannot be performed."
+
                 return 1
+
               fi
 
               echo "Previous deployment:"
+
               cat .previous_deployment
+
+              # -----------------------------------------------
+              # Load previous images
+              # -----------------------------------------------
 
               set -a
               source .previous_deployment
               set +a
 
+              echo ""
+              echo "Previous APP_IMAGE:"
+              echo "$APP_IMAGE"
+
+              echo "Previous NGINX_IMAGE:"
+              echo "$NGINX_IMAGE"
+
+              # -----------------------------------------------
+              # IMPORTANT:
+              # Update deploy.env for rollback
+              # -----------------------------------------------
+
+              cat > deploy.env <<EOF
+            APP_IMAGE=$APP_IMAGE
+            NGINX_IMAGE=$NGINX_IMAGE
+            EOF
+
+              chmod 600 deploy.env
+
+              echo ""
+              echo "deploy.env updated for rollback."
+
+              # ------------------------------------------------
+              # Pull previous images
+              # ------------------------------------------------
+
+              echo ""
               echo "Pulling previous application image..."
-              docker pull "$APP_IMAGE"
 
-              echo "Pulling previous nginx image..."
-              docker pull "$NGINX_IMAGE"
-
-              echo "Starting previous deployment..."
-
-              if ! $COMPOSE up -d; then
-                echo "Rollback compose up FAILED"
+              if ! docker pull "$APP_IMAGE"; then
+                echo "Failed to pull previous application image."
                 return 1
               fi
 
-              echo "Waiting for rollback health checks..."
+              echo "Pulling previous nginx image..."
 
-              if health_check; then
+              if ! docker pull "$NGINX_IMAGE"; then
+                echo "Failed to pull previous nginx image."
+                return 1
+              fi
+
+              # -----------------------------------------------
+              # Start previous deployment
+              # -----------------------------------------------
+
+              echo ""
+              echo "Starting previous deployment..."
+
+              if ! $COMPOSE up -d; then
+
+                echo "Rollback compose up FAILED"
+
+                return 1
+
+              fi
+
+              # -----------------------------------------------
+              # Rollback health check
+              # -----------------------------------------------
+
+              if health_check "ROLLBACK"; then
+
                 echo ""
-                echo "========================================"
+                echo "======================================"
                 echo "ROLLBACK SUCCESSFUL"
-                echo "========================================"
+                echo "======================================"
+
+                $COMPOSE ps
+
                 return 0
+
               fi
 
               echo ""
-              echo "========================================"
+              echo "======================================"
               echo "ROLLBACK FAILED"
-              echo "========================================"
+              echo "======================================"
 
               $COMPOSE ps || true
+
               $COMPOSE logs --tail=100 || true
 
               return 1
             }
 
-            # --------------------------------------------------
-            # Pull new images
-            # --------------------------------------------------
+            # =================================================
+            # PULL NEW IMAGES
+            # =================================================
 
-            echo "Pulling new application image..."
+            echo ""
+            echo "Pulling application image..."
+
             if ! docker pull "$APP_IMAGE"; then
-              echo "Failed to pull application image."
+
+              echo "Application image pull FAILED."
+
               rollback || true
+
               exit 1
+
             fi
 
-            echo "Pulling new nginx image..."
+            echo "Application image pulled successfully."
+
+            echo ""
+            echo "Pulling nginx image..."
+
             if ! docker pull "$NGINX_IMAGE"; then
-              echo "Failed to pull nginx image."
+
+              echo "Nginx image pull FAILED."
+
               rollback || true
+
               exit 1
+
             fi
 
-            # --------------------------------------------------
-            # Generate APP_KEY only if missing
-            # --------------------------------------------------
+            echo "Nginx image pulled successfully."
 
-            if ! grep -q '^APP_KEY=.\+' .env; then
+            # =================================================
+            # APP KEY
+            # =================================================
 
-              echo "APP_KEY is missing. Generating..."
+            CURRENT_APP_KEY=$(
+              grep '^APP_KEY=' .env | cut -d '=' -f2- || true
+            )
 
-              NEW_APP_KEY=$(
+            if [ -z "$CURRENT_APP_KEY" ]; then
+
+              echo ""
+              echo "APP_KEY is empty. Generating..."
+
+              if ! NEW_APP_KEY=$(
                 docker run --rm \
                   --entrypoint php \
                   "$APP_IMAGE" \
                   artisan key:generate --show
-              )
+              ); then
 
-              if [ -z "$NEW_APP_KEY" ]; then
-                echo "Failed to generate APP_KEY."
+                echo "APP_KEY generation FAILED."
+
                 rollback || true
+
                 exit 1
+
               fi
 
-              sed -i "s|^APP_KEY=.*|APP_KEY=$NEW_APP_KEY|" .env
+              if [ -z "$NEW_APP_KEY" ]; then
 
-              echo "APP_KEY generated successfully."
+                echo "Generated APP_KEY is empty."
+
+                rollback || true
+
+                exit 1
+
+              fi
+
+              sed -i \
+                "s|^APP_KEY=.*|APP_KEY=$NEW_APP_KEY|" \
+                .env
+
+              echo "APP_KEY generated."
+
+            else
+
+              echo "APP_KEY already exists. Keeping existing key."
+
             fi
 
-            # --------------------------------------------------
-            # Start new containers
-            # --------------------------------------------------
+            # =================================================
+            # START NEW CONTAINERS
+            # =================================================
 
-            echo "Starting new deployment..."
+            echo ""
+            echo "Starting new containers..."
 
             if ! $COMPOSE up -d; then
-              echo "docker compose up FAILED"
+
+              echo ""
+              echo "======================================"
+              echo "COMPOSE UP FAILED"
+              echo "======================================"
 
               $COMPOSE ps || true
               $COMPOSE logs --tail=100 || true
 
               rollback || true
+
               exit 1
+
             fi
 
-            # --------------------------------------------------
-            # Database migration
-            # --------------------------------------------------
+            echo "Containers started successfully."
 
-            echo "Running database migrations..."
+            # =================================================
+            # DATABASE MIGRATION
+            # =================================================
 
-            if ! $COMPOSE exec -T app php artisan migrate --force; then
+            echo ""
+            echo "Running migrations..."
 
-              echo "========================================"
+            if ! $COMPOSE exec -T app \
+              php artisan migrate --force
+            then
+
+              echo ""
+              echo "======================================"
               echo "MIGRATION FAILED"
-              echo "========================================"
+              echo "======================================"
 
               $COMPOSE ps || true
               $COMPOSE logs --tail=100 || true
 
               rollback || true
+
               exit 1
+
             fi
 
-            echo "Migration completed successfully."
+            echo "Migrations completed successfully."
 
-            # --------------------------------------------------
-            # Laravel optimization
-            # --------------------------------------------------
+            # =================================================
+            # LARAVEL OPTIMIZE
+            # =================================================
 
+            echo ""
             echo "Optimizing Laravel..."
 
-            if ! $COMPOSE exec -T app php artisan optimize; then
+            if ! $COMPOSE exec -T app \
+              php artisan optimize
+            then
 
-              echo "Laravel optimize FAILED"
-
-              $COMPOSE ps || true
-              $COMPOSE logs --tail=100 || true
-
-              rollback || true
-              exit 1
-            fi
-
-            # --------------------------------------------------
-            # Health checks
-            # --------------------------------------------------
-
-            echo "Running health checks..."
-
-            if ! health_check; then
-
-              echo "Health checks FAILED"
+              echo ""
+              echo "======================================"
+              echo "LARAVEL OPTIMIZE FAILED"
+              echo "======================================"
 
               $COMPOSE ps || true
               $COMPOSE logs --tail=100 || true
 
               rollback || true
+
               exit 1
+
             fi
 
-            # --------------------------------------------------
-            # Deployment successful
-            # --------------------------------------------------
+            echo "Laravel optimization completed."
+
+            # =================================================
+            # HEALTH CHECK
+            # =================================================
+
+            if ! health_check "DEPLOYMENT"; then
+
+              echo ""
+              echo "======================================"
+              echo "DEPLOYMENT HEALTH CHECK FAILED"
+              echo "======================================"
+
+              $COMPOSE ps || true
+              $COMPOSE logs --tail=100 || true
+
+              rollback || true
+
+              exit 1
+
+            fi
+
+            # =================================================
+            # DEPLOYMENT SUCCESS
+            # =================================================
 
             cat > .current_deployment <<EOF
             APP_IMAGE=$APP_IMAGE
             NGINX_IMAGE=$NGINX_IMAGE
             EOF
 
-            echo ""
-            echo "========================================"
-            echo "DEPLOYMENT SUCCESSFUL"
-            echo "========================================"
+            # -------------------------------------------------
+            # Keep deploy.env synchronized with current deploy
+            # -------------------------------------------------
 
+            cat > deploy.env <<EOF
+            APP_IMAGE=$APP_IMAGE
+            NGINX_IMAGE=$NGINX_IMAGE
+            EOF
+
+            chmod 600 deploy.env
+
+            echo ""
+            echo "======================================"
+            echo "LIVENESS:  OK"
+            echo "READINESS: OK"
+            echo "DEPLOYMENT SUCCESSFUL"
+            echo "======================================"
+
+            echo ""
             echo "Current deployment:"
+
             cat .current_deployment
 
             echo ""
             echo "Containers:"
+
             $COMPOSE ps
