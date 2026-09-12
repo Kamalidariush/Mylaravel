@@ -249,7 +249,7 @@ jobs:
             # Compose command
             # -------------------------------------------------
 
-            COMPOSE="docker compose --env-file ./deploy.env -f docker-compose.dev.yml"
+            COMPOSE="docker compose --env-file ./.env --env-file ./deploy.env -f docker-compose.dev.yml"
 
             # -------------------------------------------------
             # Validate compose
@@ -352,7 +352,7 @@ jobs:
 
                 if curl -fsS \
                   --max-time 5 \
-                  http://127.0.0.1/health/ready \
+                  http://127.0.0.1/health/ready-test \
                   > /tmp/health_ready.json
                 then
 
