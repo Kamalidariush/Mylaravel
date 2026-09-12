@@ -9,6 +9,7 @@ services:
       - "9000"
     volumes:
       - user_files:/var/www/html/storage/app/private
+      - user_files_backups:/backup/user-files
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,6 +42,7 @@ services:
     command: php artisan queue:work --sleep=3 --tries=3 --timeout=90
     volumes:
       - user_files:/var/www/html/storage/app/private
+      - user_files_backups:/backup/user-files
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,6 +59,7 @@ services:
     command: php artisan schedule:work
     volumes:
       - user_files:/var/www/html/storage/app/private
+      - user_files_backups:/backup/user-files
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,6 +113,7 @@ volumes:
   redis_data:
   user_files:
   postgres_backups:
+  user_files_backups:
 
 networks:
   backend:
