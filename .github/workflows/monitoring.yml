@@ -1,0 +1,135 @@
+name: Monitoring
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docker-compose.monitoring.yml
+      - docker/monitoring/**
+      - .github/workflows/monitoring.yml
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+
+  deploy-monitoring:
+
+    name: Deploy Monitoring
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Monitoring Compose
+        run: |
+          docker compose \
+            -f docker-compose.monitoring.yml \
+            config -q
+
+      - name: Upload Monitoring files
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 1256
+          source: |
+            docker-compose.monitoring.yml
+            docker/monitoring/
+          target: "/opt/myproject/"
+
+      - name: Deploy Monitoring
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 1256
+          script: |
+            set -Eeuo pipefail
+
+            PROJECT_DIR="/opt/myproject"
+            NETWORK_NAME="myproject_backend"
+
+            cd "${PROJECT_DIR}"
+
+            echo "========================================"
+            echo "Starting Monitoring Deployment"
+            echo "========================================"
+
+            echo ""
+            echo "Checking Docker network..."
+
+            if ! docker network inspect "${NETWORK_NAME}" >/dev/null 2>&1; then
+              echo "Creating Docker network..."
+              docker network create "${NETWORK_NAME}"
+            else
+              echo "Docker network already exists."
+            fi
+
+            echo ""
+            echo "Validating Monitoring Compose..."
+
+            docker compose \
+              -f docker-compose.monitoring.yml \
+              config -q
+
+            echo ""
+            echo "Pulling Monitoring images..."
+
+            docker compose \
+              -f docker-compose.monitoring.yml \
+              pull
+
+            echo ""
+            echo "Starting Monitoring services..."
+
+            docker compose \
+              -f docker-compose.monitoring.yml \
+              up -d --remove-orphans
+
+            echo ""
+            echo "Monitoring service status..."
+
+            docker compose \
+              -f docker-compose.monitoring.yml \
+              ps
+
+            echo ""
+            echo "Checking Prometheus..."
+
+            for i in $(seq 1 30); do
+              if curl \
+                --fail \
+                --silent \
+                --show-error \
+                http://127.0.0.1:9090/-/healthy \
+                >/dev/null; then
+
+                echo "Prometheus is healthy."
+                break
+              fi
+
+              if [ "${i}" -eq 30 ]; then
+                echo "ERROR: Prometheus health check failed."
+                docker compose \
+                  -f docker-compose.monitoring.yml \
+                  logs --tail=100 prometheus
+                exit 1
+              fi
+
+              echo "Prometheus is not ready. Retrying..."
+              sleep 5
+            done
+
+            echo ""
+            echo "========================================"
+            echo "Monitoring Deployment Successful"
+            echo "========================================"
