@@ -117,4 +117,5 @@ volumes:
 
 networks:
   backend:
-    driver: bridge
+    name: myproject_backend
+    external: true
