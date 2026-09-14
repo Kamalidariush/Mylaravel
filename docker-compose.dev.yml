@@ -92,7 +92,7 @@ services:
       - -c
       - archive_command=mkdir -p /backup/wal && test ! -f /backup/wal/%f && cp %p /backup/wal/%f
       - -c
-      - archive_timeout=60s
+      - archive_timeout=0
     environment:
       POSTGRES_DB: ${DB_DATABASE}
       POSTGRES_USER: ${DB_USERNAME}

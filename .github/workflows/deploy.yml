@@ -49,8 +49,8 @@ jobs:
           source: "docker-compose.dev.yml,scripts/deploy/"
 
           target: "/opt/myproject/"
-          overwrite: true
-          debug: true
+          
+          
 
 
       # -----------------------------------------------------
