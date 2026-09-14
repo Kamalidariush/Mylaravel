@@ -33,6 +33,28 @@ jobs:
             -f docker-compose.monitoring.yml \
             config -q
 
+            - name: Verify monitoring files
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "PWD:"
+          pwd
+
+          echo "Git status:"
+          git status --short
+
+          echo "Root files:"
+          find . -maxdepth 2 -type f | sort
+
+          echo "Checking required paths..."
+
+          test -f "./docker-compose.monitoring.yml"
+          test -d "./docker/monitoring"
+
+          find "./docker/monitoring" -type f -print
+
+          echo "Monitoring files verified successfully."
       - name: Upload Monitoring files
         uses: appleboy/scp-action@v0.1.7
         with:
