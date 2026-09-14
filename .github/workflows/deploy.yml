@@ -63,9 +63,9 @@ jobs:
           NGINX_IMAGE: ghcr.io/kamalidariush/mylaravel-nginx:${{ github.event.workflow_run.head_sha }}
 
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          password: ${{ secrets.VPS_PASSWORD }}
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
           port: 1256
 
           envs: APP_IMAGE,NGINX_IMAGE
