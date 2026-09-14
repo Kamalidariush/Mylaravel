@@ -15,15 +15,11 @@ permissions:
   contents: read
 
 jobs:
-
   deploy-monitoring:
-
     name: Deploy Monitoring
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -33,7 +29,7 @@ jobs:
             -f docker-compose.monitoring.yml \
             config -q
 
-            - name: Verify monitoring files
+      - name: Verify Monitoring Files
         shell: bash
         run: |
           set -euxo pipefail
@@ -52,10 +48,12 @@ jobs:
           test -f "./docker-compose.monitoring.yml"
           test -d "./docker/monitoring"
 
+          echo "Monitoring files:"
           find "./docker/monitoring" -type f -print
 
           echo "Monitoring files verified successfully."
-      - name: Upload Monitoring files
+
+      - name: Upload Monitoring Files
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DEV_HOST }}
@@ -66,6 +64,8 @@ jobs:
             docker-compose.monitoring.yml
             docker/monitoring/
           target: "/opt/myproject/"
+          overwrite: true
+          debug: true
 
       - name: Deploy Monitoring
         uses: appleboy/ssh-action@v1.2.0
@@ -141,9 +141,11 @@ jobs:
 
               if [ "${i}" -eq 30 ]; then
                 echo "ERROR: Prometheus health check failed."
+
                 docker compose \
                   -f docker-compose.monitoring.yml \
                   logs --tail=100 prometheus
+
                 exit 1
               fi
 
