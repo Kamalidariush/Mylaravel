@@ -1,3 +1,24 @@
+# =========================================================
+# Stage 1: Frontend build
+# =========================================================
+
+FROM node:22-alpine AS frontend
+
+WORKDIR /var/www/html
+
+COPY package*.json ./
+
+RUN npm ci
+
+COPY . .
+
+RUN npm run build
+
+
+# =========================================================
+# Stage 2: PHP-FPM application
+# =========================================================
+
 FROM php:8.3-fpm
 
 WORKDIR /var/www/html
@@ -33,6 +54,9 @@ RUN composer install \
     --prefer-dist \
     --optimize-autoloader \
     --no-dev
+
+# Copy compiled Vite assets from frontend stage
+COPY --from=frontend /var/www/html/public/build ./public/build
 
 # Laravel writable directories
 RUN mkdir -p \
