@@ -68,6 +68,7 @@ bash scripts/deploy/network.sh
 # -------------------------------------------------
 
 COMPOSE="docker compose \
+  -p myproject-dev \
   --env-file ./.env \
   --env-file ./deploy.env \
   -f docker-compose.dev.yml"
