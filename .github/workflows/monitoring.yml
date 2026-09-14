@@ -7,6 +7,7 @@ on:
     paths:
       - docker-compose.monitoring.yml
       - docker/monitoring/**
+      - scripts/monitoring/**
       - .github/workflows/monitoring.yml
 
   workflow_dispatch:
@@ -20,14 +21,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # -------------------------------------------------
+      # Checkout
+      # -------------------------------------------------
+
       - name: Checkout
         uses: actions/checkout@v4
+
+
+      # -------------------------------------------------
+      # Validate Monitoring Compose
+      # -------------------------------------------------
 
       - name: Validate Monitoring Compose
         run: |
           docker compose \
+            -p myproject-monitoring \
             -f docker-compose.monitoring.yml \
             config -q
+
+
+      # -------------------------------------------------
+      # Verify Monitoring Files
+      # -------------------------------------------------
 
       - name: Verify Monitoring Files
         shell: bash
@@ -37,21 +54,34 @@ jobs:
           echo "PWD:"
           pwd
 
+          echo ""
           echo "Git status:"
           git status --short
 
-          echo "Root files:"
-          find . -maxdepth 2 -type f | sort
-
-          echo "Checking required paths..."
+          echo ""
+          echo "Checking required files..."
 
           test -f "./docker-compose.monitoring.yml"
           test -d "./docker/monitoring"
+          test -f "./scripts/monitoring/deploy.sh"
 
+          echo ""
           echo "Monitoring files:"
+
           find "./docker/monitoring" -type f -print
 
+          echo ""
+          echo "Monitoring deployment script:"
+
+          ls -l "./scripts/monitoring/deploy.sh"
+
+          echo ""
           echo "Monitoring files verified successfully."
+
+
+      # -------------------------------------------------
+      # Upload Monitoring Files
+      # -------------------------------------------------
 
       - name: Upload Monitoring Files
         uses: appleboy/scp-action@v0.1.7
@@ -60,10 +90,18 @@ jobs:
           username: ${{ secrets.DEV_USER }}
           key: ${{ secrets.DEV_SSH_KEY }}
           port: 1256
-          source: "docker-compose.monitoring.yml,docker/monitoring"
+
+          source: "docker-compose.monitoring.yml,docker/monitoring,scripts/monitoring/deploy.sh"
+
           target: "/opt/myproject/"
+
           overwrite: true
           debug: true
+
+
+      # -------------------------------------------------
+      # Deploy Monitoring
+      # -------------------------------------------------
 
       - name: Deploy Monitoring
         uses: appleboy/ssh-action@v1.2.0
@@ -72,86 +110,22 @@ jobs:
           username: ${{ secrets.DEV_USER }}
           key: ${{ secrets.DEV_SSH_KEY }}
           port: 1256
+
           script: |
             set -Eeuo pipefail
 
-            PROJECT_DIR="/opt/myproject"
-            NETWORK_NAME="myproject_backend"
-
-            cd "${PROJECT_DIR}"
+            cd /opt/myproject
 
             echo "========================================"
             echo "Starting Monitoring Deployment"
             echo "========================================"
 
             echo ""
-            echo "Checking Docker network..."
+            echo "Making deployment script executable..."
 
-            if ! docker network inspect "${NETWORK_NAME}" >/dev/null 2>&1; then
-              echo "Creating Docker network..."
-              docker network create "${NETWORK_NAME}"
-            else
-              echo "Docker network already exists."
-            fi
+            chmod +x scripts/monitoring/deploy.sh
 
             echo ""
-            echo "Validating Monitoring Compose..."
+            echo "Running monitoring deployment..."
 
-            docker compose \
-              -f docker-compose.monitoring.yml \
-              config -q
-
-            echo ""
-            echo "Pulling Monitoring images..."
-
-            docker compose \
-              -f docker-compose.monitoring.yml \
-              pull
-
-            echo ""
-            echo "Starting Monitoring services..."
-
-            docker compose \
-              -f docker-compose.monitoring.yml \
-              up -d --remove-orphans
-
-            echo ""
-            echo "Monitoring service status..."
-
-            docker compose \
-              -f docker-compose.monitoring.yml \
-              ps
-
-            echo ""
-            echo "Checking Prometheus..."
-
-            for i in $(seq 1 30); do
-              if curl \
-                --fail \
-                --silent \
-                --show-error \
-                http://127.0.0.1:9090/-/healthy \
-                >/dev/null; then
-
-                echo "Prometheus is healthy."
-                break
-              fi
-
-              if [ "${i}" -eq 30 ]; then
-                echo "ERROR: Prometheus health check failed."
-
-                docker compose \
-                  -f docker-compose.monitoring.yml \
-                  logs --tail=100 prometheus
-
-                exit 1
-              fi
-
-              echo "Prometheus is not ready. Retrying..."
-              sleep 5
-            done
-
-            echo ""
-            echo "========================================"
-            echo "Monitoring Deployment Successful"
-            echo "========================================"
+            bash scripts/monitoring/deploy.sh
