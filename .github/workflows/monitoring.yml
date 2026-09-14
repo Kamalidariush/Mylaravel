@@ -60,9 +60,7 @@ jobs:
           username: ${{ secrets.DEV_USER }}
           key: ${{ secrets.DEV_SSH_KEY }}
           port: 1256
-          source: |
-            docker-compose.monitoring.yml
-            docker/monitoring/
+          source: "docker-compose.monitoring.yml,docker/monitoring"
           target: "/opt/myproject/"
           overwrite: true
           debug: true
