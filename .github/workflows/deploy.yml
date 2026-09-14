@@ -46,7 +46,7 @@ jobs:
           key: ${{ secrets.DEV_SSH_KEY }}
           port: 1256
 
-          گفتیsource: "docker-compose.dev.yml,scripts/deploy/"
+          source: "docker-compose.dev.yml,scripts/deploy/"
 
           target: "/opt/myproject/"
 
