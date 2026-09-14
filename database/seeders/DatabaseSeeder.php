@@ -19,11 +19,8 @@ class DatabaseSeeder extends Seeder
             'email' => $email,
         ]);
 
-        if (! $user->exists) {
-            $user->name = 'Dariush';
-            $user->password = Hash::make('admin123');
-        }
-
+        $user->name = 'Dariush';
+        $user->password = Hash::make('admin123');
         $user->role = 'admin';
 
         $user->save();
