@@ -78,7 +78,6 @@ echo "Starting Monitoring services..."
 
 docker compose \
     -p "${COMPOSE_PROJECT}" \
-    --env-file ./secrets/postgres-exporter.env \
     -f "${COMPOSE_FILE}" \
     up -d --remove-orphans
 
