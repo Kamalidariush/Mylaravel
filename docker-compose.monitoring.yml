@@ -97,11 +97,12 @@ services:
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.17.1
     restart: unless-stopped
+    env_file:
+      - ./secrets/postgres-exporter.env
     environment:
-      DATA_SOURCE_NAME: "postgresql://postgres_exporter:${POSTGRES_EXPORTER_PASSWORD}@postgres:5432/myproject?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://postgres_exporter:${POSTGRES_EXPORTER_PASSWORD}@myproject-dev-postgres-1:5432/myproject?sslmode=disable"
     networks:
       - backend
-
 volumes:
   prometheus_data:
   grafana_data:
