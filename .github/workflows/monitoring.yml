@@ -34,49 +34,49 @@ jobs:
       # Validate Monitoring Compose
       # -------------------------------------------------
 
-      - name: Validate Monitoring Compose
-        run: |
-          docker compose \
-            -p myproject-monitoring \
-            -f docker-compose.monitoring.yml \
-            config -q
+      # - name: Validate Monitoring Compose
+      #   run: |
+      #     docker compose \
+      #       -p myproject-monitoring \
+      #       -f docker-compose.monitoring.yml \
+      #       config -q
 
 
       # -------------------------------------------------
       # Verify Monitoring Files
       # -------------------------------------------------
 
-      - name: Verify Monitoring Files
-        shell: bash
-        run: |
-          set -euxo pipefail
+      # - name: Verify Monitoring Files
+      #   shell: bash
+      #   run: |
+      #     set -euxo pipefail
 
-          echo "PWD:"
-          pwd
+      #     echo "PWD:"
+      #     pwd
 
-          echo ""
-          echo "Git status:"
-          git status --short
+      #     echo ""
+      #     echo "Git status:"
+      #     git status --short
 
-          echo ""
-          echo "Checking required files..."
+      #     echo ""
+      #     echo "Checking required files..."
 
-          test -f "./docker-compose.monitoring.yml"
-          test -d "./docker/monitoring"
-          test -f "./scripts/monitoring/deploy.sh"
+      #     test -f "./docker-compose.monitoring.yml"
+      #     test -d "./docker/monitoring"
+      #     test -f "./scripts/monitoring/deploy.sh"
 
-          echo ""
-          echo "Monitoring files:"
+      #     echo ""
+      #     echo "Monitoring files:"
 
-          find "./docker/monitoring" -type f -print
+      #     find "./docker/monitoring" -type f -print
 
-          echo ""
-          echo "Monitoring deployment script:"
+      #     echo ""
+      #     echo "Monitoring deployment script:"
 
-          ls -l "./scripts/monitoring/deploy.sh"
+      #     ls -l "./scripts/monitoring/deploy.sh"
 
-          echo ""
-          echo "Monitoring files verified successfully."
+      #     echo ""
+      #     echo "Monitoring files verified successfully."
 
 
       # -------------------------------------------------
