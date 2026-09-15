@@ -107,6 +107,26 @@ services:
       retries: 5
     networks:
       - backend
+  
+  pgbackrest:
+    build:
+      context: .
+      dockerfile: docker/pgbackrest/Dockerfile
+    image: myproject-pgbackrest:latest
+    container_name: myproject-pgbackrest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - postgres_data:/var/lib/postgresql/data:ro
+      - postgres_backups:/backup
+      - ./docker/pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      - ./secrets/pgbackrest.pgpass:/root/.pgpass:ro
+      - pgbackrest_logs:/var/log/pgbackrest
+    networks:
+      - backend
+    command: ["sleep", "infinity"]
 
 volumes:
   postgres_data:
@@ -114,6 +134,7 @@ volumes:
   user_files:
   postgres_backups:
   user_files_backups:
+  pgbackrest_logs:
 
 networks:
   backend:
