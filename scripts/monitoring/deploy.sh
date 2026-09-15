@@ -6,6 +6,7 @@ PROJECT_DIR="/opt/myproject"
 NETWORK_NAME="myproject_backend"
 COMPOSE_PROJECT="myproject-monitoring"
 COMPOSE_FILE="docker-compose.monitoring.yml"
+ENV_FILE="./secrets/postgres-exporter.env"
 
 cd "${PROJECT_DIR}"
 
@@ -20,6 +21,28 @@ echo "${PROJECT_DIR}"
 echo ""
 echo "Compose project:"
 echo "${COMPOSE_PROJECT}"
+
+
+# -------------------------------------------------
+# Validate secret file
+# -------------------------------------------------
+
+echo ""
+echo "Checking PostgreSQL exporter secret..."
+
+if [ ! -f "${ENV_FILE}" ]; then
+    echo "ERROR: Secret file not found:"
+    echo "${PROJECT_DIR}/${ENV_FILE}"
+    exit 1
+fi
+
+if [ ! -r "${ENV_FILE}" ]; then
+    echo "ERROR: Secret file is not readable:"
+    echo "${PROJECT_DIR}/${ENV_FILE}"
+    exit 1
+fi
+
+echo "PostgreSQL exporter secret file found."
 
 
 # -------------------------------------------------
@@ -52,6 +75,7 @@ echo "Validating Monitoring Compose..."
 
 docker compose \
     -p "${COMPOSE_PROJECT}" \
+    --env-file "${ENV_FILE}" \
     -f "${COMPOSE_FILE}" \
     config -q
 
@@ -65,6 +89,7 @@ echo "Pulling Monitoring images..."
 
 docker compose \
     -p "${COMPOSE_PROJECT}" \
+    --env-file "${ENV_FILE}" \
     -f "${COMPOSE_FILE}" \
     pull
 
@@ -78,6 +103,7 @@ echo "Starting Monitoring services..."
 
 docker compose \
     -p "${COMPOSE_PROJECT}" \
+    --env-file "${ENV_FILE}" \
     -f "${COMPOSE_FILE}" \
     up -d --remove-orphans
 
@@ -91,6 +117,7 @@ echo "Monitoring service status..."
 
 docker compose \
     -p "${COMPOSE_PROJECT}" \
+    --env-file "${ENV_FILE}" \
     -f "${COMPOSE_FILE}" \
     ps
 
@@ -117,7 +144,6 @@ for i in $(seq 1 30); do
 
     fi
 
-
     if [ "${i}" -eq 30 ]; then
 
         echo "ERROR: Prometheus health check failed."
@@ -127,13 +153,13 @@ for i in $(seq 1 30); do
 
         docker compose \
             -p "${COMPOSE_PROJECT}" \
+            --env-file "${ENV_FILE}" \
             -f "${COMPOSE_FILE}" \
             logs --tail=100 prometheus
 
         exit 1
 
     fi
-
 
     echo "Prometheus is not ready."
     echo "Retry ${i}/30..."
@@ -152,6 +178,7 @@ echo "Final Monitoring service status:"
 
 docker compose \
     -p "${COMPOSE_PROJECT}" \
+    --env-file "${ENV_FILE}" \
     -f "${COMPOSE_FILE}" \
     ps
 
