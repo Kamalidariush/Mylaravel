@@ -91,7 +91,7 @@ jobs:
           key: ${{ secrets.DEV_SSH_KEY }}
           port: 1256
 
-          source: "docker-compose.monitoring.yml,docker/monitoring,scripts/monitoring/deploy.sh"
+          source: "docker-compose.monitoring.yml,docker/monitoring/,scripts/monitoring/deploy.sh"
 
           target: "/opt/myproject/"
 
