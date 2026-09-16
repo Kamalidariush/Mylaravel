@@ -97,10 +97,39 @@ services:
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.17.1
     restart: unless-stopped
+
     env_file:
       - ./secrets/postgres-exporter.env
+
     environment:
       DATA_SOURCE_NAME: "postgresql://postgres_exporter:${POSTGRES_EXPORTER_PASSWORD}@myproject-dev-postgres-1:5432/myproject?sslmode=disable"
+      PG_EXPORTER_EXTEND_QUERY_PATH: "/etc/postgres_exporter/queries.yaml"
+
+    volumes:
+      - ./docker/monitoring/postgres-exporter/queries.yaml:/etc/postgres_exporter/queries.yaml:ro
+
+    networks:
+      - backend
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.76.0
+    restart: unless-stopped
+
+    environment:
+      REDIS_ADDR: "redis://myproject-dev-redis-1:6379"
+
+    ports:
+      - "9121:9121"
+
+    networks:
+      - backend
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.5.1
+    restart: unless-stopped
+    command:
+      - -nginx.scrape-uri=http://myproject-dev-nginx-1/nginx_status
+    ports:
+      - "9113:9113"
     networks:
       - backend
 volumes:
