@@ -53,7 +53,8 @@ RUN composer install \
     --no-interaction \
     --prefer-dist \
     --optimize-autoloader \
-    --no-dev
+    --no-dev \
+    --no-scripts
 
 # Copy compiled Vite assets from frontend stage
 COPY --from=frontend /var/www/html/public/build ./public/build
