@@ -111,7 +111,27 @@ services:
     networks:
       - backend
 
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.76.0
+    restart: unless-stopped
 
+    environment:
+      REDIS_ADDR: "redis://myproject-dev-redis-1:6379"
+
+    ports:
+      - "9121:9121"
+
+    networks:
+      - backend
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.5.1
+    restart: unless-stopped
+    command:
+      - -nginx.scrape-uri=http://myproject-dev-nginx-1/nginx_status
+    ports:
+      - "9113:9113"
+    networks:
+      - backend
 volumes:
   prometheus_data:
   grafana_data:

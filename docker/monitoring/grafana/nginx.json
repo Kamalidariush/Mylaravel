@@ -1,0 +1,248 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Nginx Status",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {"text": "DOWN"},
+                "1": {"text": "UP"}
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "nginx_up{job=\"nginx\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Active Connections",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 9, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {"unit": "short"},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "nginx_connections_active{job=\"nginx\"}",
+          "legendFormat": "Active",
+          "refId": "A"
+        },
+        {
+          "expr": "nginx_connections_reading{job=\"nginx\"}",
+          "legendFormat": "Reading",
+          "refId": "B"
+        },
+        {
+          "expr": "nginx_connections_writing{job=\"nginx\"}",
+          "legendFormat": "Writing",
+          "refId": "C"
+        },
+        {
+          "expr": "nginx_connections_waiting{job=\"nginx\"}",
+          "legendFormat": "Waiting",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Requests / sec",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 9, "x": 15, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {"unit": "reqps"},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(nginx_http_requests_total{job=\"nginx\"}[5m])",
+          "legendFormat": "Requests/sec",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Accepted Connections / sec",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {"unit": "ops"},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(nginx_connections_accepted{job=\"nginx\"}[5m])",
+          "legendFormat": "Accepted",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Handled Connections / sec",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {"unit": "ops"},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(nginx_connections_handled{job=\"nginx\"}[5m])",
+          "legendFormat": "Handled",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Requests Total",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {"unit": "short"},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "nginx_http_requests_total{job=\"nginx\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Connection Breakdown",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {"unit": "short"},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "nginx_connections_active{job=\"nginx\"}",
+          "legendFormat": "Active",
+          "refId": "A"
+        },
+        {
+          "expr": "nginx_connections_reading{job=\"nginx\"}",
+          "legendFormat": "Reading",
+          "refId": "B"
+        },
+        {
+          "expr": "nginx_connections_writing{job=\"nginx\"}",
+          "legendFormat": "Writing",
+          "refId": "C"
+        },
+        {
+          "expr": "nginx_connections_waiting{job=\"nginx\"}",
+          "legendFormat": "Waiting",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Connections Accepted vs Handled",
+      "type": "timeseries",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {"unit": "ops"},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(nginx_connections_accepted{job=\"nginx\"}[5m])",
+          "legendFormat": "Accepted/sec",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(nginx_connections_handled{job=\"nginx\"}[5m])",
+          "legendFormat": "Handled/sec",
+          "refId": "B"
+        }
+      ]
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "nginx",
+    "web",
+    "reverse-proxy"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "refresh": 1,
+        "current": {}
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "title": "Nginx - Production Monitoring",
+  "uid": "nginx-production"
+}
