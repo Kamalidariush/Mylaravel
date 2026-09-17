@@ -24,14 +24,52 @@ jobs:
     steps:
 
       # -----------------------------------------------------
-      # Checkout
+      # Checkout exact commit that passed CI
       # -----------------------------------------------------
 
       - name: Checkout
         uses: actions/checkout@v4
-
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+
+
+      # -----------------------------------------------------
+      # Setup Node.js
+      # -----------------------------------------------------
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+
+      # -----------------------------------------------------
+      # Install frontend dependencies
+      # -----------------------------------------------------
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+
+      # -----------------------------------------------------
+      # Build frontend assets
+      # -----------------------------------------------------
+
+      - name: Build frontend
+        run: npm run build
+
+
+      # -----------------------------------------------------
+      # Verify frontend build output
+      # -----------------------------------------------------
+
+      - name: Verify frontend build
+        run: |
+          test -f public/build/manifest.json
+          test -n "$(find public/build/assets -type f | head -n 1)"
+          echo "Frontend build verified successfully"
+          find public/build -maxdepth 2 -type f
 
 
       # -----------------------------------------------------
@@ -40,7 +78,6 @@ jobs:
 
       - name: Login to GHCR
         uses: docker/login-action@v3
-
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
