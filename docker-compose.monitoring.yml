@@ -145,18 +145,18 @@ services:
     networks:
       - backend
     
-    tempo:
-      image: grafana/tempo:3.0.3
-      restart: unless-stopped
-      command: ["-config.file=/etc/tempo/tempo.yml"]
-      volumes:
-        - ./docker/monitoring/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
-        - tempo_data:/var/tempo
-      ports:
-        - "3200:3200"
-        - "4319:4317"
-      networks:
-        - backend
+  tempo:
+    image: grafana/tempo:3.0.3
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    volumes:
+      - ./docker/monitoring/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "3200:3200"
+      - "4319:4317"
+    networks:
+      - backend
 
 volumes:
   prometheus_data:
