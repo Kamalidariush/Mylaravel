@@ -8,10 +8,14 @@ services:
     environment:
       OTEL_PHP_AUTOLOAD_ENABLED: "true"
       OTEL_SERVICE_NAME: "laravel-app"
+      
       OTEL_TRACES_EXPORTER: "otlp"
+      OTEL_METRICS_EXPORTER: "otlp"
+
       OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
-      OTEL_PROPAGATORS: "baggage,tracecontext"
+
+      OTEL_PROPAGATORS: "tracecontext,baggage"
     expose:
       - "9000"
     volumes:
