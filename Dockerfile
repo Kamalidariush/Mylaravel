@@ -17,8 +17,8 @@ RUN apt-get update && apt-get install -y \
     bcmath \
     zip \
     mbstring \
-    && pecl install redis \
-    && docker-php-ext-enable redis \
+    && pecl install redis opentelemetry \
+    && docker-php-ext-enable redis opentelemetry \
     && rm -rf /var/lib/apt/lists/*
 
 # Composer
