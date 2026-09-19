@@ -132,6 +132,19 @@ services:
       - "9113:9113"
     networks:
       - backend
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.138.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yml"]
+    volumes:
+      - ./docker/monitoring/otel-collector/config.yml:/etc/otelcol-contrib/config.yml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    networks:
+      - backend
+
 volumes:
   prometheus_data:
   grafana_data:

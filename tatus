@@ -1,0 +1,15 @@
+[1mdiff --git a/composer.json b/composer.json[m
+[1mindex 5286fb7..26b8ed9 100644[m
+[1m--- a/composer.json[m
+[1m+++ b/composer.json[m
+[36m@@ -10,7 +10,9 @@[m
+         "iamfarhad/laravel-prometheus": "^1.1",[m
+         "laravel/framework": "^12.0",[m
+         "laravel/tinker": "^2.10.1",[m
+[31m-        "open-telemetry/opentelemetry": "1.0"[m
+[32m+[m[32m        "open-telemetry/opentelemetry": "1.0",[m
+[32m+[m[32m        "open-telemetry/opentelemetry-auto-laravel": "^1.9",[m
+[32m+[m[32m        "php-http/httplug": "^2.4"[m
+     },[m
+     "require-dev": {[m
+         "fakerphp/faker": "^1.23",[m
