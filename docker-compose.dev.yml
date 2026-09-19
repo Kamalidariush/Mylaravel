@@ -5,6 +5,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      OTEL_PHP_AUTOLOAD_ENABLED: "true"
+      OTEL_SERVICE_NAME: "laravel-app"
+      OTEL_TRACES_EXPORTER: "otlp"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_PROPAGATORS: "baggage,tracecontext"
     expose:
       - "9000"
     volumes:
