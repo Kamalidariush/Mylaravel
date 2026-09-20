@@ -12,6 +12,7 @@
         "laravel/tinker": "^2.10.1",
         "open-telemetry/opentelemetry": "1.0",
         "open-telemetry/opentelemetry-auto-laravel": "^1.9",
+        "open-telemetry/opentelemetry-metrics-runtime": "*",
         "php-http/httplug": "^2.4"
     },
     "require-dev": {
