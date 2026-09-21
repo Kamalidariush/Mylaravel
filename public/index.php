@@ -1,4 +1,3 @@
-```php
 <?php
 
 use Illuminate\Foundation\Application;
@@ -31,4 +30,3 @@ putenv('OTEL_PHP_AUTOLOAD_ENABLED=true');
 $app = require_once __DIR__.'/../bootstrap/app.php';
 
 $app->handleRequest(Request::capture());
-```
