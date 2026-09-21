@@ -1,0 +1,21 @@
+groups:
+  - name: infrastructure
+    rules:
+
+      - alert: InstanceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Monitoring target is down"
+          description: "{{ $labels.job }} target {{ $labels.instance }} has been down for more than 2 minutes."
+      
+      - alert: TestAlert
+        expr: vector(1)
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Test alert"
+          description: "This is a test alert from Prometheus."
