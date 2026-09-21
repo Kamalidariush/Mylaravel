@@ -1,0 +1,55 @@
+groups:
+  - name: laravel-scheduler
+    rules:
+
+      # Scheduler command failures
+      - alert: LaravelSchedulerFailures
+        expr: |
+          increase(
+            artisan_commands_total{
+              command="schedule_run",
+              status!="success"
+            }[5m]
+          ) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Laravel scheduler command failed"
+          description: "Laravel scheduler has reported one or more failed schedule_run commands during the last 5 minutes."
+
+      # Scheduler execution latency - P95
+      - alert: LaravelSchedulerHighLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(
+                artisan_command_duration_seconds_bucket{
+                  command="schedule_run"
+                }[5m]
+              )
+            )
+          ) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Laravel scheduler is slow"
+          description: "P95 scheduler execution time has been above 5 seconds for 10 minutes."
+
+      # Scheduler completely stopped
+      - alert: LaravelSchedulerStopped
+        expr: |
+          increase(
+            artisan_commands_total{
+              command="schedule_run",
+              status="success"
+            }[10m]
+          ) == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Laravel scheduler appears stopped"
+          description: "No successful schedule_run command has been observed during the last 10 minutes."

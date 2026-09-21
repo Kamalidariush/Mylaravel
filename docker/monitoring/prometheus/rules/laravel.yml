@@ -1,0 +1,46 @@
+groups:
+  - name: laravel
+    rules:
+
+      # HTTP request latency - P95
+      - alert: LaravelHighRequestLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, route) (
+              rate(http_request_duration_seconds_bucket[5m])
+            )
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Laravel request latency is high"
+          description: "P95 latency for route {{ $labels.route }} has been above 1 second for 10 minutes."
+
+      # HTTP request latency - P99
+      - alert: LaravelCriticalRequestLatency
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le, route) (
+              rate(http_request_duration_seconds_bucket[5m])
+            )
+          ) > 3
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Laravel request latency is critical"
+          description: "P99 latency for route {{ $labels.route }} has been above 3 seconds for 5 minutes."
+
+      # No HTTP traffic at all
+      - alert: LaravelNoHTTPRequests
+        expr: |
+          sum(rate(http_request_duration_seconds_count[5m])) == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Laravel has no HTTP traffic"
+          description: "No HTTP requests have been observed by Laravel during the last 10 minutes."

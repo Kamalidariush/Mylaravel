@@ -1,0 +1,27 @@
+groups:
+  - name: docker
+    rules:
+
+      - alert: ContainerRestarting
+        expr: |
+          increase(container_start_time_seconds{name!=""}[15m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container is restarting"
+          description: "Container {{ $labels.name }} has restarted during the last 15 minutes."
+
+      - alert: ContainerHighMemory
+        expr: |
+          (
+            container_memory_working_set_bytes{name!=""}
+            /
+            container_spec_memory_limit_bytes{name!="", container_spec_memory_limit_bytes!="0"}
+          ) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container memory usage is high"
+          description: "Container {{ $labels.name }} is using more than 85% of its memory limit."

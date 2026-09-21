@@ -1,0 +1,49 @@
+groups:
+  - name: postgres
+    rules:
+
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL exporter cannot reach the PostgreSQL server."
+
+      - alert: PostgreSQLConnectionsHigh
+        expr: |
+          (
+            sum(pg_stat_database_numbackends)
+            /
+            pg_settings_max_connections
+          ) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL connections are high"
+          description: "PostgreSQL is using more than 80% of available connections."
+
+      - alert: PostgreSQLConnectionsCritical
+        expr: |
+          (
+            sum(pg_stat_database_numbackends)
+            /
+            pg_settings_max_connections
+          ) * 100 > 95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL connections are critical"
+          description: "PostgreSQL is using more than 95% of available connections."
+
+      - alert: PostgreSQLDeadlocks
+        expr: increase(pg_stat_database_deadlocks[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL deadlocks detected"
+          description: "PostgreSQL deadlocks have been detected during the last 5 minutes."
