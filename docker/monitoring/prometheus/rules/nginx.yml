@@ -1,0 +1,30 @@
+groups:
+  - name: nginx
+    rules:
+
+      - alert: NginxDown
+        expr: nginx_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Nginx is down"
+          description: "Nginx exporter cannot reach the Nginx status endpoint."
+
+      - alert: NginxHighActiveConnections
+        expr: nginx_connections_active > 500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Nginx active connections"
+          description: "Nginx has more than 500 active connections."
+
+      - alert: NginxHighRequestRate
+        expr: rate(nginx_http_requests_total[5m]) > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Nginx request rate"
+          description: "Nginx request rate is above 100 requests per second."
