@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./docker/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/monitoring/prometheus/rules:/etc/prometheus/rules:ro
       - prometheus_data:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -28,7 +29,33 @@ services:
       start_period: 15s
     networks:
       - backend
-
+  
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    restart: unless-stopped
+    volumes:
+      - ./docker/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "9093:9093"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--spider",
+          "-q",
+          "http://127.0.0.1:9093/-/healthy"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend
   node-exporter:
     image: prom/node-exporter:v1.9.1
     restart: unless-stopped
@@ -163,6 +190,7 @@ volumes:
   prometheus_data:
   grafana_data:
   tempo_data:
+  alertmanager_data:
 
 networks:
   backend:
