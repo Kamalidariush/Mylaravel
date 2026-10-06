@@ -1,0 +1,66 @@
+---
+# 02-kubernetes-prerequisites/01-expand-root-lvm.yml
+# Expand the root LVM logical volume to use all available free space.
+#
+# Target:
+#   - k8s-1
+#   - k8s-2
+#   - k8s-3
+#   - k8s-4
+#
+# Expected layout:
+#   /dev/sda3
+#       └── ubuntu-vg/ubuntu-lv
+#               └── /
+#
+# The operation is idempotent:
+# if no free space remains in the VG, nothing is changed.
+
+- name: Expand root LVM on Kubernetes nodes
+  hosts:
+    - control_plane
+    - worker
+
+  become: true
+  gather_facts: true
+
+  tasks:
+
+    - name: "LVM | Check volume group free space"
+      ansible.builtin.command:
+        cmd: vgs --noheadings --units g --nosuffix -o vg_free ubuntu-vg
+      register: vg_free
+      changed_when: false
+
+    - name: "LVM | Display available VG space"
+      ansible.builtin.debug:
+        msg: "Available free space in ubuntu-vg on {{ inventory_hostname }}: {{ vg_free.stdout | trim }} GiB"
+
+    - name: "LVM | Expand root logical volume"
+      ansible.builtin.command:
+        cmd: lvextend -l +100%FREE /dev/mapper/ubuntu--vg-ubuntu--lv
+      when: (vg_free.stdout | trim | float) > 0.01
+      register: lvextend_result
+
+    - name: "Filesystem | Detect root filesystem"
+      ansible.builtin.command:
+        cmd: findmnt -n -o FSTYPE /
+      register: root_filesystem
+      changed_when: false
+
+    - name: "Filesystem | Expand ext4 root filesystem"
+      ansible.builtin.command:
+        cmd: resize2fs /dev/mapper/ubuntu--vg-ubuntu--lv
+      when:
+        - root_filesystem.stdout | trim == "ext4"
+        - vg_free.stdout | trim | float > 0.01
+
+    - name: "LVM | Verify root filesystem size"
+      ansible.builtin.command:
+        cmd: df -h /
+      register: root_disk
+      changed_when: false
+
+    - name: "LVM | Display final root filesystem"
+      ansible.builtin.debug:
+        var: root_disk.stdout_lines

@@ -1,0 +1,246 @@
+---
+# 04-kubernetes/01-cni.yml
+# Install Cilium CNI on the Kubernetes cluster.
+# Images are rendered from the Helm chart and pre-pulled into containerd
+# automatically so the playbook is fully reproducible.
+
+- name: Install Cilium CNI
+  hosts: k8s-1
+  become: true
+  gather_facts: true
+
+  vars:
+    cilium_version: "1.20.2"
+    cilium_namespace: "kube-system"
+    cilium_release_name: "cilium"
+
+    cilium_helm_repo_name: "cilium"
+    cilium_helm_repo_url: "https://helm.cilium.io/"
+
+    cilium_render_file: "/tmp/cilium-rendered.yaml"
+
+    kubernetes_api_vip: "192.168.1.101"
+    kubernetes_api_port: "6443"
+
+  tasks:
+
+    # ------------------------------------------------------------
+    # 01. Check Kubernetes
+    # ------------------------------------------------------------
+
+    - name: "Cilium | Verify Kubernetes API"
+      ansible.builtin.command:
+        cmd: kubectl get nodes
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: kubernetes_nodes
+      changed_when: false
+
+    - name: "Cilium | Display Kubernetes nodes"
+      ansible.builtin.debug:
+        var: kubernetes_nodes.stdout_lines
+
+    # ------------------------------------------------------------
+    # 02. Add Cilium Helm repository
+    # ------------------------------------------------------------
+
+    - name: "Cilium | Add Helm repository"
+      ansible.builtin.command:
+        cmd: >
+          helm repo add
+          {{ cilium_helm_repo_name }}
+          {{ cilium_helm_repo_url }}
+      register: cilium_repo_add
+      changed_when: >
+        'has been added' in cilium_repo_add.stdout
+        or 'already exists' not in cilium_repo_add.stderr
+
+    - name: "Cilium | Update Helm repositories"
+      ansible.builtin.command:
+        cmd: helm repo update
+      changed_when: false
+
+    # ------------------------------------------------------------
+    # 03. Render Cilium chart
+    # ------------------------------------------------------------
+
+    - name: "Cilium | Render Helm chart"
+      ansible.builtin.shell:
+        cmd: |
+          helm template {{ cilium_release_name }} \
+            {{ cilium_helm_repo_name }}/cilium \
+            --version {{ cilium_version }} \
+            --namespace {{ cilium_namespace }} \
+            --set ipam.mode=kubernetes \
+            --set kubeProxyReplacement=false \
+            --set k8sServiceHost={{ kubernetes_api_vip }} \
+            --set k8sServicePort={{ kubernetes_api_port }} \
+            --set image.pullPolicy=IfNotPresent \
+            --set operator.image.pullPolicy=IfNotPresent \
+            --set envoy.image.pullPolicy=IfNotPresent \
+            --set k8sServicePort={{ kubernetes_api_port }} \
+            --set operator.replicas=1 \
+            > {{ cilium_render_file }}
+      register: cilium_render
+      changed_when: true
+
+    # ------------------------------------------------------------
+    # 04. Extract all required container images
+    # ------------------------------------------------------------
+
+    - name: "Cilium | Extract required container images"
+      ansible.builtin.shell:
+        cmd: >
+          awk '$1 == "image:" {print $2}'
+          {{ cilium_render_file }}
+          | tr -d '"'
+          | sort -u
+      register: cilium_images
+      changed_when: false
+
+    - name: "Cilium | Display required images"
+      ansible.builtin.debug:
+        var: cilium_images.stdout_lines
+
+    # ------------------------------------------------------------
+    # 05. Pull images into containerd
+    # ------------------------------------------------------------
+
+    - name: "Cilium | Pull required images into containerd"
+      ansible.builtin.command:
+        cmd: "ctr -n k8s.io images pull {{ item }}"
+      loop: "{{ cilium_images.stdout_lines }}"
+      register: cilium_image_pull
+      retries: 3
+      delay: 10
+      until: cilium_image_pull.rc == 0
+
+    # ------------------------------------------------------------
+    # 06. Verify images exist in containerd
+    # ------------------------------------------------------------
+
+    - name: "Cilium | List containerd images"
+      ansible.builtin.command:
+        cmd: "ctr -n k8s.io images ls -q"
+      register: cilium_containerd_images
+      changed_when: false
+
+    - name: "Cilium | Verify required images"
+      ansible.builtin.assert:
+        that:
+          - item in cilium_containerd_images.stdout_lines
+        fail_msg: "Cilium image is missing from containerd: {{ item }}"
+        success_msg: "Cilium image exists in containerd: {{ item }}"
+      loop: "{{ cilium_images.stdout_lines }}"
+
+    # ------------------------------------------------------------
+    # 07. Install / upgrade Cilium
+    # ------------------------------------------------------------
+
+    - name: "Cilium | Install or upgrade Helm release"
+      ansible.builtin.command:
+        cmd: >
+          helm upgrade --install
+          {{ cilium_release_name }}
+          {{ cilium_helm_repo_name }}/cilium
+          --version {{ cilium_version }}
+          --namespace {{ cilium_namespace }}
+          --set ipam.mode=kubernetes
+          --set kubeProxyReplacement=false
+          --set k8sServiceHost={{ kubernetes_api_vip }}
+          --set k8sServicePort={{ kubernetes_api_port }}
+          --set operator.replicas=1
+          --set image.pullPolicy=IfNotPresent
+          --set operator.image.pullPolicy=IfNotPresent
+          --set envoy.image.pullPolicy=IfNotPresent
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cilium_install
+      changed_when: true
+
+    # ------------------------------------------------------------
+    # 08. Wait for Cilium DaemonSet
+    # ------------------------------------------------------------
+
+    - name: "Cilium | Wait for Cilium DaemonSet"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ cilium_namespace }}
+          rollout status daemonset/cilium
+          --timeout=10m
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false
+
+    # ------------------------------------------------------------
+    # 09. Wait for Cilium Operator
+    # ------------------------------------------------------------
+
+    - name: "Cilium | Wait for Cilium Operator"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ cilium_namespace }}
+          rollout status deployment/cilium-operator
+          --timeout=10m
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false
+
+    # ------------------------------------------------------------
+    # 10. Wait for all nodes to become Ready
+    # ------------------------------------------------------------
+
+    - name: "Cilium | Wait for Kubernetes nodes"
+      ansible.builtin.shell:
+        cmd: |
+          kubectl get nodes \
+            --no-headers \
+            | awk '$2 != "Ready" {bad=1} END {exit bad}'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: nodes_ready
+      retries: 30
+      delay: 10
+      until: nodes_ready.rc == 0
+      changed_when: false
+
+    # ------------------------------------------------------------
+    # 11. Final verification
+    # ------------------------------------------------------------
+
+    - name: "Cilium | Get pods"
+      ansible.builtin.command:
+        cmd: kubectl -n kube-system get pods -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cilium_pods
+      changed_when: false
+
+    - name: "Cilium | Display pods"
+      ansible.builtin.debug:
+        var: cilium_pods.stdout_lines
+
+    - name: "Cilium | Get nodes"
+      ansible.builtin.command:
+        cmd: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: final_nodes
+      changed_when: false
+
+    - name: "Cilium | Display final node status"
+      ansible.builtin.debug:
+        var: final_nodes.stdout_lines
+
+    - name: "Cilium | Get Cilium status"
+      ansible.builtin.command:
+        cmd: cilium status --wait
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cilium_status
+      changed_when: false
+      failed_when: false
+
+    - name: "Cilium | Display final status"
+      ansible.builtin.debug:
+        var: cilium_status.stdout_lines

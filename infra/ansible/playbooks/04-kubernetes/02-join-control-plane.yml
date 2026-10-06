@@ -1,0 +1,357 @@
+---
+# 04-kubernetes/02-join-control-plane.yml
+#
+# Join additional Kubernetes control-plane nodes.
+#
+# Architecture:
+#
+#   HAProxy VIP
+#   192.168.1.101:6443
+#           |
+#     +-----+-----+
+#     |     |     |
+#   k8s-1 k8s-2 k8s-3
+#    CP     CP     CP
+#
+# k8s-1 is the initial control-plane.
+# k8s-2 and k8s-3 are additional control-plane nodes.
+#
+# The kubeadm token, CA hash and certificate key are generated
+# automatically on k8s-1.
+#
+# No manual token/certificate copying is required.
+
+# ==================================================================
+# 01. Generate join credentials on k8s-1
+# ==================================================================
+
+- name: Prepare Kubernetes control-plane join
+  hosts: k8s-1
+  become: true
+  gather_facts: false
+
+  vars:
+    kubernetes_api_vip: "192.168.1.101"
+    kubernetes_api_port: "6443"
+
+  tasks:
+
+    # --------------------------------------------------------------
+    # 01-01. Verify the existing cluster
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Verify Kubernetes cluster"
+      ansible.builtin.command:
+        cmd: kubectl get nodes
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: existing_nodes
+      changed_when: false
+
+    - name: "Join Control Plane | Display existing nodes"
+      ansible.builtin.debug:
+        var: existing_nodes.stdout_lines
+
+    # --------------------------------------------------------------
+    # 01-02. Generate a new discovery token
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Generate kubeadm token"
+      ansible.builtin.command:
+        cmd: kubeadm token create
+      register: kubeadm_token
+      changed_when: true
+
+    - name: "Join Control Plane | Validate kubeadm token"
+      ansible.builtin.assert:
+        that:
+          - kubeadm_token.stdout | trim | length > 0
+        fail_msg: "Failed to generate kubeadm discovery token."
+        success_msg: "Kubeadm discovery token generated."
+
+    # --------------------------------------------------------------
+    # 01-03. Upload control-plane certificates
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Upload certificates"
+      ansible.builtin.command:
+        cmd: kubeadm init phase upload-certs --upload-certs
+      register: upload_certs
+      changed_when: true
+
+    - name: "Join Control Plane | Extract certificate key"
+      ansible.builtin.set_fact:
+        kubeadm_certificate_key: >-
+          {{
+            upload_certs.stdout_lines
+            | select('match', '^[a-f0-9]{64}$')
+            | list
+            | last
+          }}
+
+    - name: "Join Control Plane | Validate certificate key"
+      ansible.builtin.assert:
+        that:
+          - kubeadm_certificate_key is defined
+          - kubeadm_certificate_key | length == 64
+        fail_msg: "Could not extract kubeadm certificate key."
+        success_msg: "Kubeadm certificate key generated."
+
+    # --------------------------------------------------------------
+    # 01-04. Calculate Kubernetes CA certificate hash
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Calculate CA certificate hash"
+      ansible.builtin.shell:
+        cmd: |
+          openssl x509 \
+            -pubkey \
+            -in /etc/kubernetes/pki/ca.crt \
+            | openssl rsa \
+              -pubin \
+              -outform DER 2>/dev/null \
+            | openssl dgst \
+              -sha256 \
+              -hex \
+            | awk '{print $2}'
+      register: kubeadm_ca_hash
+      changed_when: false
+
+    - name: "Join Control Plane | Validate CA certificate hash"
+      ansible.builtin.assert:
+        that:
+          - kubeadm_ca_hash.stdout | trim | length == 64
+        fail_msg: "Could not calculate Kubernetes CA certificate hash."
+        success_msg: "Kubernetes CA certificate hash calculated."
+
+    # --------------------------------------------------------------
+    # 01-05. Store join information on k8s-1
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Store join credentials"
+      ansible.builtin.set_fact:
+        control_plane_join_token: "{{ kubeadm_token.stdout | trim }}"
+        control_plane_ca_hash: "{{ kubeadm_ca_hash.stdout | trim }}"
+        control_plane_certificate_key: "{{ kubeadm_certificate_key }}"
+
+    - name: "Join Control Plane | Verify join information"
+      ansible.builtin.assert:
+        that:
+          - control_plane_join_token | length > 0
+          - control_plane_ca_hash | length == 64
+          - control_plane_certificate_key | length == 64
+        fail_msg: "Kubernetes control-plane join information is incomplete."
+        success_msg: "Kubernetes control-plane join information is ready."
+
+
+# ==================================================================
+# 02. Join k8s-2 and k8s-3
+# ==================================================================
+
+- name: Join additional control-plane nodes
+  hosts: k8s-2:k8s-3
+  become: true
+  gather_facts: true
+
+  vars:
+    kubernetes_api_vip: "192.168.1.101"
+    kubernetes_api_port: "6443"
+
+  tasks:
+
+    # --------------------------------------------------------------
+    # 02-01. Check current Kubernetes state
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Check kubelet configuration"
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_config
+
+    - name: "Join Control Plane | Check admin configuration"
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_config
+
+    - name: "Join Control Plane | Check control-plane manifests"
+      ansible.builtin.stat:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+      register: api_server_manifest
+
+    # --------------------------------------------------------------
+    # 02-02. Detect already joined nodes
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Skip already joined node"
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} is already joined to Kubernetes."
+      when:
+        - kubelet_config.stat.exists
+        - admin_config.stat.exists
+        - api_server_manifest.stat.exists
+
+    # --------------------------------------------------------------
+    # 02-03. Detect incomplete previous join
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Stop on incomplete Kubernetes state"
+      ansible.builtin.fail:
+        msg: >-
+          {{ inventory_hostname }} has a partial Kubernetes installation.
+          kubelet.conf={{ kubelet_config.stat.exists }},
+          admin.conf={{ admin_config.stat.exists }},
+          kube-apiserver manifest={{ api_server_manifest.stat.exists }}.
+          Do not automatically reset this node because doing so could
+          destroy an existing Kubernetes configuration.
+      when:
+        - kubelet_config.stat.exists
+        - not admin_config.stat.exists or not api_server_manifest.stat.exists
+
+    # --------------------------------------------------------------
+    # 02-04. Join control-plane
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Join {{ inventory_hostname }}"
+      ansible.builtin.command:
+        cmd: >
+          kubeadm join
+          {{ kubernetes_api_vip }}:{{ kubernetes_api_port }}
+          --token {{ hostvars['k8s-1']['control_plane_join_token'] }}
+          --discovery-token-ca-cert-hash
+          sha256:{{ hostvars['k8s-1']['control_plane_ca_hash'] }}
+          --control-plane
+          --certificate-key
+          {{ hostvars['k8s-1']['control_plane_certificate_key'] }}
+      when:
+        - not kubelet_config.stat.exists
+        - not admin_config.stat.exists
+        - not api_server_manifest.stat.exists
+      register: kubeadm_join
+      timeout: 900
+
+    # --------------------------------------------------------------
+    # 02-05. Verify kubelet
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Enable kubelet"
+      ansible.builtin.systemd:
+        name: kubelet
+        enabled: true
+        state: started
+
+    # --------------------------------------------------------------
+    # 02-06. Verify control-plane configuration
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Verify kubelet configuration"
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: final_kubelet_config
+
+    - name: "Join Control Plane | Verify admin configuration"
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: final_admin_config
+
+    - name: "Join Control Plane | Verify API server manifest"
+      ansible.builtin.stat:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+      register: final_api_server_manifest
+
+    - name: "Join Control Plane | Validate node"
+      ansible.builtin.assert:
+        that:
+          - final_kubelet_config.stat.exists
+          - final_admin_config.stat.exists
+          - final_api_server_manifest.stat.exists
+        fail_msg: >-
+          {{ inventory_hostname }} does not have a complete
+          Kubernetes control-plane configuration.
+        success_msg: >-
+          {{ inventory_hostname }} successfully joined as control-plane.
+
+
+# ==================================================================
+# 03. Verify complete control-plane cluster
+# ==================================================================
+
+- name: Verify Kubernetes control-plane cluster
+  hosts: k8s-1
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    # --------------------------------------------------------------
+    # 03-01. Wait for k8s-2 and k8s-3 to appear
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Wait for k8s-2 and k8s-3"
+      ansible.builtin.command:
+        cmd: kubectl get nodes --no-headers
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cluster_nodes
+      retries: 30
+      delay: 10
+      until:
+        - "'k8s-2' in cluster_nodes.stdout"
+        - "'k8s-3' in cluster_nodes.stdout"
+      changed_when: false
+
+    # --------------------------------------------------------------
+    # 03-02. Wait for all control-plane nodes to become Ready
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Wait for all control-plane nodes Ready"
+      ansible.builtin.shell:
+        cmd: |
+          kubectl get nodes \
+            --no-headers \
+            | awk '$1 == "k8s-1" || $1 == "k8s-2" || $1 == "k8s-3" {
+                if ($2 != "Ready") {
+                  bad=1
+                }
+              }
+              END {
+                exit bad
+              }'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: control_plane_ready
+      retries: 60
+      delay: 10
+      until: control_plane_ready.rc == 0
+      changed_when: false
+
+    # --------------------------------------------------------------
+    # 03-03. Final node status
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Get final nodes"
+      ansible.builtin.command:
+        cmd: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: final_nodes
+      changed_when: false
+
+    - name: "Join Control Plane | Display final nodes"
+      ansible.builtin.debug:
+        var: final_nodes.stdout_lines
+
+    # --------------------------------------------------------------
+    # 03-04. Verify Cilium
+    # --------------------------------------------------------------
+
+    - name: "Join Control Plane | Get Cilium pods"
+      ansible.builtin.command:
+        cmd: kubectl -n kube-system get pods -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cilium_pods
+      changed_when: false
+
+    - name: "Join Control Plane | Display Cilium pods"
+      ansible.builtin.debug:
+        var: cilium_pods.stdout_lines
