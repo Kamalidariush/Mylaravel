@@ -1,0 +1,41 @@
+---
+# docker-compose.yml
+#
+# Runs one HAProxy container on each dedicated HAProxy VPS.
+#
+# haproxy-1 -> 192.168.1.138
+# haproxy-2 -> 192.168.1.140
+#
+# Both servers run the same HAProxy container.
+# Keepalived will later move the Kubernetes API VIP
+# between these two servers.
+#
+# Host networking is used because HAProxy must listen directly
+# on the Keepalived VIP: 192.168.1.101:6443.
+
+services:
+
+  haproxy:
+    image: haproxy:3.2
+    container_name: haproxy
+
+    restart: unless-stopped
+
+    network_mode: host
+
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "haproxy",
+          "-c",
+          "-f",
+          "/usr/local/etc/haproxy/haproxy.cfg"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

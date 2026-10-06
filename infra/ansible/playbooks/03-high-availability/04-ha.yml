@@ -1,0 +1,22 @@
+---
+# 04-ha.yml
+#
+# Master Playbook for Kubernetes API High Availability.
+#
+# Execution order:
+#   1. Docker
+#   2. HAProxy
+#   3. Keepalived
+#   4. Automated verification
+
+- name: "HA | 00 | Prepare Docker"
+  ansible.builtin.import_playbook: 00-docker.yml
+
+- name: "HA | 01 | Deploy HAProxy"
+  ansible.builtin.import_playbook: 01-haproxy.yml
+
+- name: "HA | 02 | Configure Keepalived"
+  ansible.builtin.import_playbook: 02-keepalived.yml
+
+- name: "HA | 03 | Verify HA"
+  ansible.builtin.import_playbook: 03-verify.yml

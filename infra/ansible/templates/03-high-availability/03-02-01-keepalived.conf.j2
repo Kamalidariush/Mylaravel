@@ -1,0 +1,55 @@
+! ---------------------------------------------------------
+! Keepalived configuration
+!
+! Kubernetes API HA
+!
+! VIP:
+!   {{ keepalived_vip }}
+!
+! HAProxy:
+!   {{ inventory_hostname }}
+!
+! State:
+!   {{ keepalived_state }}
+!
+! Priority:
+!   {{ keepalived_priority }}
+! ---------------------------------------------------------
+
+global_defs {
+    router_id {{ keepalived_router_id }}
+}
+
+vrrp_script chk_haproxy {
+    script "/usr/local/bin/check-haproxy.sh"
+    interval 2
+    timeout 2
+    fall 2
+    rise 2
+}
+
+vrrp_instance VI_51 {
+
+    state {{ keepalived_state }}
+
+    interface {{ ansible_default_ipv4.interface }}
+
+    virtual_router_id {{ keepalived_router_id }}
+
+    priority {{ keepalived_priority }}
+
+    advert_int 1
+
+    authentication {
+        auth_type PASS
+        auth_pass 51haproxy
+    }
+
+    virtual_ipaddress {
+        {{ keepalived_vip_cidr }}
+    }
+
+    track_script {
+        chk_haproxy
+    }
+}

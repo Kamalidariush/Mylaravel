@@ -1,0 +1,125 @@
+---
+# 01-haproxy.yml
+#
+# Deploy HAProxy on the dedicated load-balancer VPSs.
+#
+# Targets:
+#   haproxy-1 -> 192.168.1.138
+#   haproxy-2 -> 192.168.1.140
+#
+# Each VPS runs exactly ONE HAProxy container.
+#
+# HAProxy uses host networking and listens on:
+#
+#   192.168.1.101:6443
+#
+# The VIP is managed later by Keepalived.
+#
+# This playbook:
+#   1. Enables ip_nonlocal_bind
+#   2. Creates HAProxy deployment directory
+#   3. Copies Docker Compose configuration
+#   4. Copies shared HAProxy configuration
+#   5. Pulls HAProxy image
+#   6. Starts HAProxy
+#   7. Shows container status
+
+- name: Deploy HAProxy
+  hosts: load_balancer
+  become: true
+  gather_facts: true
+
+  vars:
+    haproxy_deploy_dir: "/opt/haproxy"
+
+  tasks:
+
+    # -------------------------------------------------------
+    # 1. Allow HAProxy to bind to the VIP before the VIP
+    #    is assigned to the host by Keepalived.
+    # -------------------------------------------------------
+
+    - name: Enable non-local IP binding
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_nonlocal_bind
+        value: "1"
+        state: present
+        reload: true
+
+    # -------------------------------------------------------
+    # 2. Create HAProxy deployment directory
+    # -------------------------------------------------------
+
+    - name: Create HAProxy deployment directory
+      ansible.builtin.file:
+        path: "{{ haproxy_deploy_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # -------------------------------------------------------
+    # 3. Copy Docker Compose file
+    # -------------------------------------------------------
+
+    - name: Copy HAProxy Docker Compose configuration
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../files/03-high-availability/03-01-02-docker-compose.yml"
+        dest: "{{ haproxy_deploy_dir }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: "0644"
+
+    # -------------------------------------------------------
+    # 4. Copy shared HAProxy configuration
+    # -------------------------------------------------------
+
+    - name: Copy HAProxy configuration
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../files/03-high-availability/03-01-01-haproxy.cfg"
+        dest: "{{ haproxy_deploy_dir }}/haproxy.cfg"
+        owner: root
+        group: root
+        mode: "0644"
+
+    # -------------------------------------------------------
+    # 5. Pull HAProxy image
+    # -------------------------------------------------------
+
+    - name: Pull HAProxy image
+      ansible.builtin.command:
+        cmd: docker compose pull
+        chdir: "{{ haproxy_deploy_dir }}"
+      register: haproxy_pull
+      changed_when: >
+        'Downloaded newer image' in haproxy_pull.stdout
+        or 'Pulling' in haproxy_pull.stdout
+
+    # -------------------------------------------------------
+    # 6. Start HAProxy
+    # -------------------------------------------------------
+
+    - name: Start HAProxy container
+      ansible.builtin.command:
+        cmd: docker compose up -d
+        chdir: "{{ haproxy_deploy_dir }}"
+      register: haproxy_up
+      changed_when: >
+        'Creating' in haproxy_up.stdout
+        or 'Created' in haproxy_up.stdout
+        or 'Recreating' in haproxy_up.stdout
+        or 'Started' in haproxy_up.stdout
+
+    # -------------------------------------------------------
+    # 7. Show container status
+    # -------------------------------------------------------
+
+    - name: Check HAProxy container
+      ansible.builtin.command:
+        cmd: docker ps --filter name=haproxy
+      register: haproxy_status
+      changed_when: false
+
+    - name: Show HAProxy status
+      ansible.builtin.debug:
+        var: haproxy_status.stdout
