@@ -1,0 +1,157 @@
+---
+# ---------------------------------------------------------
+# 07-01-postgresql.yml
+# Path:
+#   infra/ansible/playbooks/07-database/01-postgresql.yml
+#
+# Purpose:
+#   Deploy a 3-instance PostgreSQL cluster using CloudNativePG.
+#
+# Targets:
+#   k8s-1
+#
+# Architecture:
+#
+#   CloudNativePG Operator
+#           ↓
+#   PostgreSQL Cluster
+#      ┌────┼────┐
+#      ↓    ↓    ↓
+#     pg-1 pg-2 pg-3
+#      │    │    │
+#      └── Longhorn
+#
+# Storage:
+#   Longhorn
+#
+# Replicas:
+#   3 PostgreSQL instances
+#
+# Database:
+#   myproject
+#
+# Important:
+#   This file creates the PostgreSQL Cluster only.
+#   PgBouncer and HAProxy database routing will be added later.
+# ---------------------------------------------------------
+
+- name: "PostgreSQL | Deploy CloudNativePG cluster"
+  hosts: k8s-1
+  become: false
+  gather_facts: false
+
+  vars:
+
+    postgres_namespace: "database"
+    postgres_cluster_name: "postgres"
+
+    postgres_instances: 3
+
+    postgres_storage_class: "longhorn"
+    postgres_storage_size: "5Gi"
+
+    postgres_database: "myproject"
+    postgres_owner: "myproject"
+
+    # PostgreSQL image.
+    postgres_image: "ghcr.io/cloudnative-pg/postgresql:18"
+
+  tasks:
+
+    # -----------------------------------------------------
+    # Namespace
+    # -----------------------------------------------------
+
+    - name: "PostgreSQL | Create namespace"
+      ansible.builtin.command:
+        cmd: >
+          kubectl create namespace {{ postgres_namespace }}
+      register: postgres_namespace_result
+      changed_when: postgres_namespace_result.rc == 0
+      failed_when:
+        - postgres_namespace_result.rc != 0
+        - "'AlreadyExists' not in postgres_namespace_result.stderr"
+
+    # -----------------------------------------------------
+    # PostgreSQL cluster manifest
+    # -----------------------------------------------------
+
+    - name: "PostgreSQL | Apply cluster manifest"
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: |
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          metadata:
+            name: {{ postgres_cluster_name }}
+            namespace: {{ postgres_namespace }}
+          spec:
+
+            instances: {{ postgres_instances }}
+
+            imageName: {{ postgres_image }}
+
+            storage:
+              storageClass: {{ postgres_storage_class }}
+              size: {{ postgres_storage_size }}
+
+            bootstrap:
+              initdb:
+                database: {{ postgres_database }}
+                owner: {{ postgres_owner }}
+
+            monitoring:
+              enablePodMonitor: false
+
+            resources:
+              requests:
+                cpu: "500m"
+                memory: "512Mi"
+              limits:
+                cpu: "2"
+                memory: "2Gi"
+
+            primaryUpdateStrategy: unsupervised
+
+            switchoverDelay: 30
+
+    # -----------------------------------------------------
+    # Wait for PostgreSQL cluster
+    # -----------------------------------------------------
+
+    - name: "PostgreSQL | Wait for cluster to become ready"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ postgres_namespace }}
+          wait
+          --for=condition=Ready
+          cluster/{{ postgres_cluster_name }}
+          --timeout=15m
+      changed_when: false
+
+    # -----------------------------------------------------
+    # Verification
+    # -----------------------------------------------------
+
+    - name: "PostgreSQL | Show cluster status"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ postgres_namespace }}
+          get cluster
+          {{ postgres_cluster_name }}
+          -o wide
+      changed_when: false
+
+    - name: "PostgreSQL | Show PostgreSQL pods"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ postgres_namespace }}
+          get pods -o wide
+      changed_when: false
+
+    - name: "PostgreSQL | Show persistent volume claims"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ postgres_namespace }}
+          get pvc
+      changed_when: false
