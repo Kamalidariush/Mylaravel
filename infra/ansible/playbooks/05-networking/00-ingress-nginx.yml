@@ -1,0 +1,255 @@
+---
+# 00-ingress-nginx.yml
+# Path: infra/ansible/playbooks/05-networking/00-ingress-nginx.yml
+#
+# Install and configure Ingress-NGINX using Helm.
+#
+# Target:
+# - k8s-1
+#
+# Kubernetes API access:
+# - /home/rayan/.kube/config
+#
+# Ingress-NGINX:
+# - Service type: NodePort
+# - HTTP: 30080
+# - HTTPS: 30443
+#
+# Registry:
+# registry.k8s.io is not accessible in this environment.
+#
+# Therefore Ingress-NGINX images use the Huawei Cloud mirror.
+#
+# IMPORTANT:
+# The official Helm chart contains fixed image digests.
+# Those digests belong to registry.k8s.io and are NOT necessarily
+# available on the Huawei mirror.
+#
+# Therefore the digest values are explicitly cleared and the images
+# are pulled by tag only.
+
+- name: "Ingress | Install Ingress-NGINX"
+  hosts: "k8s-1"
+  become: false
+  gather_facts: false
+
+  vars:
+    kubeconfig: "/home/rayan/.kube/config"
+
+    ingress_namespace: "ingress-nginx"
+    ingress_release: "ingress-nginx"
+    ingress_chart: "ingress-nginx/ingress-nginx"
+
+    ingress_http_nodeport: 30080
+    ingress_https_nodeport: 30443
+
+    # Huawei Cloud mirror for registry.k8s.io
+    ingress_controller_registry: "swr.cn-north-4.myhuaweicloud.com/ddn-k8s/registry.k8s.io"
+    ingress_controller_repository: "ingress-nginx/controller"
+    ingress_controller_tag: "v1.15.1"
+
+    ingress_webhook_registry: "swr.cn-north-4.myhuaweicloud.com/ddn-k8s/registry.k8s.io"
+    ingress_webhook_repository: "ingress-nginx/kube-webhook-certgen"
+    ingress_webhook_tag: "v1.6.9"
+
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+
+  tasks:
+
+    # ---------------------------------------------------------
+    # Verify Helm
+    # ---------------------------------------------------------
+
+    - name: "Ingress | Verify Helm"
+      ansible.builtin.command:
+        cmd: helm version
+      register: helm_version
+      changed_when: false
+
+    - name: "Ingress | Display Helm version"
+      ansible.builtin.debug:
+        var: helm_version.stdout
+
+    # ---------------------------------------------------------
+    # Verify kubectl
+    # ---------------------------------------------------------
+
+    - name: "Ingress | Verify kubectl"
+      ansible.builtin.command:
+        cmd: kubectl version --client
+      register: kubectl_version
+      changed_when: false
+
+    # ---------------------------------------------------------
+    # Verify Kubernetes cluster
+    # ---------------------------------------------------------
+
+    - name: "Ingress | Verify Kubernetes nodes"
+      ansible.builtin.command:
+        cmd: kubectl get nodes
+      register: kubernetes_nodes
+      changed_when: false
+
+    - name: "Ingress | Display Kubernetes nodes"
+      ansible.builtin.debug:
+        var: kubernetes_nodes.stdout_lines
+
+    # ---------------------------------------------------------
+    # Helm repository
+    # ---------------------------------------------------------
+
+    - name: "Ingress | Add ingress-nginx Helm repository"
+      ansible.builtin.command:
+        cmd: >
+          helm repo add ingress-nginx
+          https://kubernetes.github.io/ingress-nginx
+      register: helm_repo_add
+      changed_when: >
+        'already exists' not in
+        (helm_repo_add.stdout | default('')) and
+        'already exists' not in
+        (helm_repo_add.stderr | default(''))
+
+    - name: "Ingress | Update Helm repositories"
+      ansible.builtin.command:
+        cmd: helm repo update
+      changed_when: false
+
+    # ---------------------------------------------------------
+    # Namespace
+    # ---------------------------------------------------------
+
+    - name: "Ingress | Create namespace"
+      ansible.builtin.command:
+        cmd: kubectl create namespace {{ ingress_namespace }}
+      register: namespace_create
+      failed_when:
+        - namespace_create.rc != 0
+        - "'AlreadyExists' not in namespace_create.stderr"
+      changed_when: namespace_create.rc == 0
+
+    # ---------------------------------------------------------
+    # Install / Upgrade Ingress-NGINX
+    # ---------------------------------------------------------
+
+    - name: "Ingress | Install or upgrade ingress-nginx"
+      ansible.builtin.command:
+        cmd: >
+          helm upgrade --install {{ ingress_release }} {{ ingress_chart }}
+          --namespace {{ ingress_namespace }}
+          --create-namespace
+          --set controller.replicaCount=3
+
+          --set controller.service.type=NodePort
+          --set controller.service.nodePorts.http={{ ingress_http_nodeport }}
+          --set controller.service.nodePorts.https={{ ingress_https_nodeport }}
+
+          --set controller.image.registry={{ ingress_controller_registry }}
+          --set controller.image.image={{ ingress_controller_repository }}
+          --set controller.image.tag={{ ingress_controller_tag }}
+          --set controller.image.digest=
+
+          --set controller.admissionWebhooks.patch.image.registry={{ ingress_webhook_registry }}
+          --set controller.admissionWebhooks.patch.image.image={{ ingress_webhook_repository }}
+          --set controller.admissionWebhooks.patch.image.tag={{ ingress_webhook_tag }}
+          --set controller.admissionWebhooks.patch.image.digest=
+
+          --wait
+          --timeout 10m
+      register: ingress_install
+
+    - name: "Ingress | Display Helm installation result"
+      ansible.builtin.debug:
+        var: ingress_install.stdout_lines
+
+    # ---------------------------------------------------------
+    # Wait for controller
+    # ---------------------------------------------------------
+
+    - name: "Ingress | Wait for controller rollout"
+      ansible.builtin.command:
+        cmd: >
+          kubectl rollout status
+          deployment/{{ ingress_release }}-controller
+          -n {{ ingress_namespace }}
+          --timeout=600s
+      changed_when: false
+
+    # ---------------------------------------------------------
+    # Verify Pods
+    # ---------------------------------------------------------
+
+    - name: "Ingress | Get ingress pods"
+      ansible.builtin.command:
+        cmd: kubectl get pods -n {{ ingress_namespace }} -o wide
+      register: ingress_pods
+      changed_when: false
+
+    - name: "Ingress | Display ingress pods"
+      ansible.builtin.debug:
+        var: ingress_pods.stdout_lines
+
+    # ---------------------------------------------------------
+    # Verify Service
+    # ---------------------------------------------------------
+
+    - name: "Ingress | Get ingress service"
+      ansible.builtin.command:
+        cmd: kubectl get svc -n {{ ingress_namespace }}
+      register: ingress_services
+      changed_when: false
+
+    - name: "Ingress | Display ingress services"
+      ansible.builtin.debug:
+        var: ingress_services.stdout_lines
+
+    # ---------------------------------------------------------
+    # Verify HTTP NodePort
+    # ---------------------------------------------------------
+
+    - name: "Ingress | Read HTTP NodePort"
+      ansible.builtin.command:
+        cmd: >
+          kubectl get svc {{ ingress_release }}-controller
+          -n {{ ingress_namespace }}
+          -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}'
+      register: ingress_http_port
+      changed_when: false
+
+    - name: "Ingress | Verify HTTP NodePort"
+      ansible.builtin.assert:
+        that:
+          - ingress_http_port.stdout | int == ingress_http_nodeport
+        fail_msg: >-
+          Ingress HTTP NodePort is incorrect.
+          Expected: {{ ingress_http_nodeport }}
+          Found: {{ ingress_http_port.stdout }}
+        success_msg: >-
+          Ingress HTTP NodePort is correctly configured:
+          {{ ingress_http_nodeport }}
+
+    # ---------------------------------------------------------
+    # Verify HTTPS NodePort
+    # ---------------------------------------------------------
+
+    - name: "Ingress | Read HTTPS NodePort"
+      ansible.builtin.command:
+        cmd: >
+          kubectl get svc {{ ingress_release }}-controller
+          -n {{ ingress_namespace }}
+          -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}'
+      register: ingress_https_port
+      changed_when: false
+
+    - name: "Ingress | Verify HTTPS NodePort"
+      ansible.builtin.assert:
+        that:
+          - ingress_https_port.stdout | int == ingress_https_nodeport
+        fail_msg: >-
+          Ingress HTTPS NodePort is incorrect.
+          Expected: {{ ingress_https_nodeport }}
+          Found: {{ ingress_https_port.stdout }}
+        success_msg: >-
+          Ingress HTTPS NodePort is correctly configured:
+          {{ ingress_https_nodeport }}

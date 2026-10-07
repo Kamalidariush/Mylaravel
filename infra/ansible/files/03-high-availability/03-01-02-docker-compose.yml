@@ -1,41 +1,106 @@
 ---
-# docker-compose.yml
+# ---------------------------------------------------------
+# 03-01-02-docker-compose.yml
+# Path:
+#   infra/ansible/files/03-high-availability/03-01-02-docker-compose.yml
 #
-# Runs one HAProxy container on each dedicated HAProxy VPS.
+# Purpose:
+#   Run HAProxy as a single container on each dedicated
+#   load-balancer VPS.
 #
-# haproxy-1 -> 192.168.1.138
-# haproxy-2 -> 192.168.1.140
+# Targets:
+#   haproxy-1 -> 192.168.1.138
+#   haproxy-2 -> 192.168.1.140
 #
-# Both servers run the same HAProxy container.
-# Keepalived will later move the Kubernetes API VIP
-# between these two servers.
+# Network mode:
+#   host
 #
-# Host networking is used because HAProxy must listen directly
-# on the Keepalived VIP: 192.168.1.101:6443.
+# Why host networking:
+#   HAProxy must directly bind to:
+#
+#     192.168.1.101:6443  -> Kubernetes API
+#     192.168.1.101:80    -> Ingress HTTP
+#     192.168.1.101:443   -> Ingress HTTPS
+#
+#   The VIP 192.168.1.101 is managed by Keepalived.
+#
+# Important:
+#   No ports: section is required because HAProxy uses
+#   the host network namespace directly.
+#
+# Configuration:
+#   /opt/haproxy/haproxy.cfg
+#
+# Container:
+#   haproxy
+#
+# Image:
+#   haproxy:3.2
+# ---------------------------------------------------------
 
 services:
 
   haproxy:
+
+    # -----------------------------------------------------
+    # HAProxy version
+    # -----------------------------------------------------
     image: haproxy:3.2
+
     container_name: haproxy
 
-    restart: unless-stopped
-
+    # -----------------------------------------------------
+    # Use the host network namespace.
+    #
+    # This allows HAProxy to bind directly to the
+    # Keepalived VIP and host ports.
+    # -----------------------------------------------------
     network_mode: host
 
+    # -----------------------------------------------------
+    # Restart automatically after failure or reboot.
+    # -----------------------------------------------------
+    restart: unless-stopped
+    # Allow HAProxy to bind privileged ports:
+    #   80
+    #   443
+    cap_add:
+      - NET_BIND_SERVICE
+
+    # -----------------------------------------------------
+    # HAProxy configuration
+    # -----------------------------------------------------
     volumes:
       - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
 
+    # -----------------------------------------------------
+    # Validate configuration before starting HAProxy.
+    # -----------------------------------------------------
+    command:
+      - haproxy
+      - -W
+      - -db
+      - -f
+      - /usr/local/etc/haproxy/haproxy.cfg
+
+    # -----------------------------------------------------
+    # Container health check.
+    #
+    # The HAProxy image does not necessarily contain `ss`,
+    # therefore health checking must not depend on it.
+    #
+    # We validate the HAProxy process itself by checking
+    # whether HAProxy can parse the configuration.
+    # -----------------------------------------------------
     healthcheck:
       test:
-        [
-          "CMD",
-          "haproxy",
-          "-c",
-          "-f",
-          "/usr/local/etc/haproxy/haproxy.cfg"
-        ]
+        - CMD
+        - haproxy
+        - -c
+        - -f
+        - /usr/local/etc/haproxy/haproxy.cfg
+
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 5s

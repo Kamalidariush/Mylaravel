@@ -1,29 +1,90 @@
 ---
+# ---------------------------------------------------------
 # 01-haproxy.yml
+# Path:
+#   infra/ansible/playbooks/03-high-availability/01-haproxy.yml
 #
-# Deploy HAProxy on the dedicated load-balancer VPSs.
+# Purpose:
+#   Deploy and manage HAProxy on the dedicated load-balancer
+#   VPSs.
 #
 # Targets:
 #   haproxy-1 -> 192.168.1.138
 #   haproxy-2 -> 192.168.1.140
 #
-# Each VPS runs exactly ONE HAProxy container.
+# Architecture:
+#   Each load-balancer VPS runs exactly ONE HAProxy container.
 #
-# HAProxy uses host networking and listens on:
+#   HAProxy uses Docker host networking.
 #
-#   192.168.1.101:6443
+# Keepalived:
+#   Keepalived manages the Kubernetes/Ingress VIP:
 #
-# The VIP is managed later by Keepalived.
+#     192.168.1.101
+#
+# HAProxy endpoints:
+#
+#   Kubernetes API:
+#     192.168.1.101:6443
+#
+#   Ingress HTTP:
+#     192.168.1.101:80
+#
+#   Ingress HTTPS:
+#     192.168.1.101:443
+#
+# Kubernetes API backend:
+#
+#   k8s-1 -> 192.168.1.134:6443
+#   k8s-2 -> 192.168.1.135:6443
+#   k8s-3 -> 192.168.1.136:6443
+#
+# Ingress HTTP backend:
+#
+#   k8s-1 -> 192.168.1.134:30080
+#   k8s-2 -> 192.168.1.135:30080
+#   k8s-3 -> 192.168.1.136:30080
+#   k8s-4 -> 192.168.1.137:30080
+#
+# Ingress HTTPS backend:
+#
+#   k8s-1 -> 192.168.1.134:30443
+#   k8s-2 -> 192.168.1.135:30443
+#   k8s-3 -> 192.168.1.136:30443
+#   k8s-4 -> 192.168.1.137:30443
+#
+# Deployment files:
+#
+#   HAProxy configuration:
+#     files/03-high-availability/03-01-01-haproxy.cfg
+#
+#   Docker Compose configuration:
+#     files/03-high-availability/03-01-02-docker-compose.yml
+#
+# Remote deployment directory:
+#
+#   /opt/haproxy
 #
 # This playbook:
-#   1. Enables ip_nonlocal_bind
-#   2. Creates HAProxy deployment directory
-#   3. Copies Docker Compose configuration
-#   4. Copies shared HAProxy configuration
-#   5. Pulls HAProxy image
-#   6. Starts HAProxy
-#   7. Shows container status
-
+#
+#   1. Enables ip_nonlocal_bind.
+#   2. Creates /opt/haproxy.
+#   3. Copies Docker Compose configuration.
+#   4. Copies HAProxy configuration.
+#   5. Validates HAProxy configuration.
+#   6. Pulls the HAProxy Docker image.
+#   7. Starts/recreates the HAProxy container.
+#   8. Waits for the container to become running.
+#   9. Displays container status.
+#  10. Verifies HAProxy listening ports.
+#
+# Safety:
+#
+#   HAProxy configuration is validated before the container is
+#   started/recreated.
+#
+#   The Kubernetes API frontend on port 6443 is preserved.
+# ---------------------------------------------------------
 - name: Deploy HAProxy
   hosts: load_balancer
   become: true
@@ -32,11 +93,16 @@
   vars:
     haproxy_deploy_dir: "/opt/haproxy"
 
+    haproxy_config_src: >-
+      {{ playbook_dir }}/../../files/03-high-availability/03-01-01-haproxy.cfg
+
+    haproxy_compose_src: >-
+      {{ playbook_dir }}/../../files/03-high-availability/03-01-02-docker-compose.yml
+
   tasks:
 
     # -------------------------------------------------------
-    # 1. Allow HAProxy to bind to the VIP before the VIP
-    #    is assigned to the host by Keepalived.
+    # 1. Allow binding to the Keepalived VIP.
     # -------------------------------------------------------
 
     - name: Enable non-local IP binding
@@ -45,9 +111,27 @@
         value: "1"
         state: present
         reload: true
-
+    # -----------------------------------------------------
+    # Allow the HAProxy container to bind privileged ports.
+    #
+    # The official HAProxy image runs the HAProxy process
+    # as a non-root user.
+    #
+    # Required ports:
+    #   80
+    #   443
+    #   6443
+    #
+    # This is required because HAProxy uses host networking.
+    # -----------------------------------------------------
+    - name: Allow unprivileged processes to bind low ports
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_unprivileged_port_start
+        value: "0"
+        state: present
+        reload: true
     # -------------------------------------------------------
-    # 2. Create HAProxy deployment directory
+    # 2. Create deployment directory.
     # -------------------------------------------------------
 
     - name: Create HAProxy deployment directory
@@ -59,31 +143,53 @@
         mode: "0755"
 
     # -------------------------------------------------------
-    # 3. Copy Docker Compose file
+    # 3. Copy Docker Compose configuration.
     # -------------------------------------------------------
 
     - name: Copy HAProxy Docker Compose configuration
       ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../files/03-high-availability/03-01-02-docker-compose.yml"
+        src: "{{ haproxy_compose_src }}"
         dest: "{{ haproxy_deploy_dir }}/docker-compose.yml"
         owner: root
         group: root
         mode: "0644"
 
     # -------------------------------------------------------
-    # 4. Copy shared HAProxy configuration
+    # 4. Copy HAProxy configuration.
     # -------------------------------------------------------
 
     - name: Copy HAProxy configuration
       ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../files/03-high-availability/03-01-01-haproxy.cfg"
+        src: "{{ haproxy_config_src }}"
         dest: "{{ haproxy_deploy_dir }}/haproxy.cfg"
         owner: root
         group: root
         mode: "0644"
 
     # -------------------------------------------------------
-    # 5. Pull HAProxy image
+    # 5. Validate HAProxy configuration.
+    #
+    # Docker image is used for validation.
+    # No running HAProxy container is changed here.
+    # -------------------------------------------------------
+
+    - name: Validate HAProxy configuration
+      ansible.builtin.command:
+        cmd: >
+          docker run --rm
+          --network host
+          -v {{ haproxy_deploy_dir }}/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+          haproxy:3.2
+          haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
+      register: haproxy_config_check
+      changed_when: false
+
+    - name: Show HAProxy configuration validation
+      ansible.builtin.debug:
+        var: haproxy_config_check.stdout_lines
+
+    # -------------------------------------------------------
+    # 6. Pull HAProxy image.
     # -------------------------------------------------------
 
     - name: Pull HAProxy image
@@ -96,7 +202,7 @@
         or 'Pulling' in haproxy_pull.stdout
 
     # -------------------------------------------------------
-    # 6. Start HAProxy
+    # 7. Start or recreate HAProxy.
     # -------------------------------------------------------
 
     - name: Start HAProxy container
@@ -111,7 +217,20 @@
         or 'Started' in haproxy_up.stdout
 
     # -------------------------------------------------------
-    # 7. Show container status
+    # 8. Wait for HAProxy container.
+    # -------------------------------------------------------
+
+    - name: Wait for HAProxy container
+      ansible.builtin.command:
+        cmd: docker inspect -f '{{ "{{.State.Running}}" }}' haproxy
+      register: haproxy_running
+      retries: 10
+      delay: 2
+      until: haproxy_running.stdout == "true"
+      changed_when: false
+
+    # -------------------------------------------------------
+    # 9. Show HAProxy container status.
     # -------------------------------------------------------
 
     - name: Check HAProxy container
@@ -122,4 +241,21 @@
 
     - name: Show HAProxy status
       ansible.builtin.debug:
-        var: haproxy_status.stdout
+        var: haproxy_status.stdout_lines
+
+    # -------------------------------------------------------
+    # 10. Verify HAProxy listening ports.
+    # -------------------------------------------------------
+
+    - name: Check HAProxy listening ports
+      ansible.builtin.command:
+        cmd: >
+          docker exec haproxy
+          sh -c "ss -lnt"
+      register: haproxy_ports
+      changed_when: false
+      failed_when: false
+
+    - name: Show HAProxy listening ports
+      ansible.builtin.debug:
+        var: haproxy_ports.stdout_lines
