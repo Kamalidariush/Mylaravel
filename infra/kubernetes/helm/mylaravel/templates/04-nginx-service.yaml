@@ -1,0 +1,25 @@
+
+# 04 - Expose Nginx internally for Ingress traffic.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mylaravel.fullname" . }}-nginx
+  labels:
+    {{- include "mylaravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nginx
+
+spec:
+  # 01 - Keep the Service internal to the Kubernetes cluster.
+  type: {{ .Values.service.nginx.type }}
+
+  # 02 - Forward HTTP traffic to the Nginx container port.
+  ports:
+    - name: http
+      port: {{ .Values.service.nginx.port }}
+      targetPort: http
+      protocol: TCP
+
+  # 03 - Select only Nginx Pods.
+  selector:
+    {{- include "mylaravel.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: nginx

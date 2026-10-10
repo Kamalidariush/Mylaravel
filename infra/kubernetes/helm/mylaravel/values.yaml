@@ -1,0 +1,130 @@
+
+# 00 - Configure default values for the MyLaravel Helm chart.
+# Never store passwords, tokens, or other secrets in this file.
+
+# 01 - Define application replica counts.
+replicaCount:
+  app: 2
+  nginx: 2
+  queue: 1
+  scheduler: 1
+
+# 02 - Configure application and Nginx container images.
+# Replace the placeholder tag with the exact Git commit SHA before deployment.
+image:
+  app:
+    repository: ghcr.io/kamalidariush/mylaravel
+    tag: "REPLACE_WITH_GIT_SHA"
+    pullPolicy: IfNotPresent
+
+  nginx:
+    repository: ghcr.io/kamalidariush/mylaravel-nginx
+    tag: "REPLACE_WITH_GIT_SHA"
+    pullPolicy: IfNotPresent
+
+# 03 - Configure optional image pull credentials.
+# Leave empty when the GHCR images are publicly accessible.
+imagePullSecrets: []
+
+# 04 - Configure Helm-generated resource names.
+nameOverride: ""
+fullnameOverride: mylaravel
+
+# 05 - Define non-sensitive Laravel runtime configuration.
+app:
+  env:
+    APP_ENV: production
+    APP_DEBUG: "false"
+    LOG_CHANNEL: stderr
+    LOG_LEVEL: info
+
+    DB_CONNECTION: pgsql
+    DB_HOST: postgres-pgbouncer.database.svc.cluster.local
+    DB_PORT: "5432"
+    DB_DATABASE: myproject
+
+    CACHE_STORE: redis
+    SESSION_DRIVER: redis
+    QUEUE_CONNECTION: redis
+
+    REDIS_CLIENT: phpredis
+    REDIS_HOST: redis-master.cache.svc.cluster.local
+    REDIS_PORT: "6379"
+
+    FILESYSTEM_DISK: s3
+    AWS_DEFAULT_REGION: us-east-1
+    AWS_BUCKET: laravel-files
+    AWS_ENDPOINT: http://seaweedfs-s3.object-storage.svc.cluster.local:8333
+    AWS_USE_PATH_STYLE_ENDPOINT: "true"
+
+  # This Secret must exist in the same namespace as the Laravel Pods.
+  # Required keys: APP_KEY, DB_USERNAME, DB_PASSWORD,
+  # REDIS_PASSWORD, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY.
+  existingSecret: mylaravel-runtime
+
+# 06 - Define internal Kubernetes Services.
+service:
+  app:
+    type: ClusterIP
+    port: 9000
+
+  nginx:
+    type: ClusterIP
+    port: 80
+
+# 07 - Configure Ingress-NGINX integration.
+# Keep disabled until the application Deployment is verified.
+ingress:
+  enabled: false
+  className: nginx
+  host: laravel.example.com
+
+  tls:
+    enabled: false
+    secretName: mylaravel-tls
+
+# 08 - Define container resource requests and limits.
+resources:
+  app:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  nginx:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  queue:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  scheduler:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# 09 - Configure persistent storage for private uploads.
+storage:
+  enabled: true
+  storageClassName: longhorn
+  size: 5Gi
+  mountPath: /var/www/html/storage/app/private
+
+# 10 - Provide optional Kubernetes scheduling overrides.
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,71 @@
+
+# 06 - Run the Laravel task scheduler as a separate Deployment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mylaravel.fullname" . }}-scheduler
+  labels:
+    {{- include "mylaravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+
+spec:
+  # 01 - Run one scheduler Pod to avoid duplicate scheduled tasks.
+  replicas: {{ .Values.replicaCount.scheduler }}
+
+  # 02 - Select scheduler Pods managed by this Deployment.
+  selector:
+    matchLabels:
+      {{- include "mylaravel.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: scheduler
+
+  template:
+    metadata:
+      labels:
+        {{- include "mylaravel.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: scheduler
+
+    spec:
+      # 03 - Configure optional credentials for private image registries.
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        - name: scheduler
+
+          # 04 - Reuse the Laravel application image.
+          image: "{{ .Values.image.app.repository }}:{{ .Values.image.app.tag }}"
+          imagePullPolicy: {{ .Values.image.app.pullPolicy }}
+
+          # 05 - Run Laravel's scheduler continuously.
+          command: ["php", "artisan", "schedule:work"]
+
+          # 06 - Load non-sensitive application configuration.
+          envFrom:
+            - configMapRef:
+                name: {{ include "mylaravel.fullname" . }}-config
+
+            # 07 - Load credentials from a Kubernetes Secret.
+            - secretRef:
+                name: {{ .Values.app.existingSecret }}
+
+          # 08 - Apply scheduler resource requests and limits.
+          resources:
+            {{- toYaml .Values.resources.scheduler | nindent 12 }}
+
+      # 09 - Apply optional node scheduling rules.
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

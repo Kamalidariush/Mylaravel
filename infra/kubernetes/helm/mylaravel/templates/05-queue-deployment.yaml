@@ -1,0 +1,77 @@
+
+# 05 - Run Laravel queue workers as a separate Deployment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mylaravel.fullname" . }}-queue
+  labels:
+    {{- include "mylaravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: queue
+
+spec:
+  # 01 - Set the number of queue worker Pods.
+  replicas: {{ .Values.replicaCount.queue }}
+
+  # 02 - Select queue worker Pods managed by this Deployment.
+  selector:
+    matchLabels:
+      {{- include "mylaravel.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: queue
+
+  template:
+    metadata:
+      labels:
+        {{- include "mylaravel.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: queue
+
+    spec:
+      # 03 - Configure optional credentials for private image registries.
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        - name: queue
+
+          # 04 - Reuse the same Laravel application image.
+          image: "{{ .Values.image.app.repository }}:{{ .Values.image.app.tag }}"
+          imagePullPolicy: {{ .Values.image.app.pullPolicy }}
+
+          # 05 - Start the Laravel queue worker.
+          command: ["php", "artisan"]
+          args:
+            - queue:work
+            - redis
+            - --sleep=3
+            - --tries=3
+            - --timeout=90
+
+          # 06 - Load non-sensitive application configuration.
+          envFrom:
+            - configMapRef:
+                name: {{ include "mylaravel.fullname" . }}-config
+
+            # 07 - Load application credentials from a Kubernetes Secret.
+            - secretRef:
+                name: {{ .Values.app.existingSecret }}
+
+          # 08 - Apply queue worker resource requests and limits.
+          resources:
+            {{- toYaml .Values.resources.queue | nindent 12 }}
+
+      # 09 - Apply optional node scheduling rules.
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

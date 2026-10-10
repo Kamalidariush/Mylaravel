@@ -1,0 +1,87 @@
+
+# 03 - Deploy Nginx as the HTTP frontend for Laravel.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mylaravel.fullname" . }}-nginx
+  labels:
+    {{- include "mylaravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nginx
+
+spec:
+  # 01 - Run the configured number of Nginx replicas.
+  replicas: {{ .Values.replicaCount.nginx }}
+
+  # 02 - Select the Nginx Pods managed by this Deployment.
+  selector:
+    matchLabels:
+      {{- include "mylaravel.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nginx
+
+  template:
+    metadata:
+      labels:
+        {{- include "mylaravel.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: nginx
+
+    spec:
+      # 03 - Configure optional credentials for private image registries.
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        - name: nginx
+
+          # 04 - Use the Nginx image configured in values.yaml.
+          image: "{{ .Values.image.nginx.repository }}:{{ .Values.image.nginx.tag }}"
+          imagePullPolicy: {{ .Values.image.nginx.pullPolicy }}
+
+          # 05 - Expose HTTP inside the cluster.
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+
+          # 06 - Check whether Nginx accepts HTTP connections.
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+
+          # 07 - Apply Nginx resource requests and limits.
+          resources:
+            {{- toYaml .Values.resources.nginx | nindent 12 }}
+
+      # 08 - Apply optional node scheduling rules.
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

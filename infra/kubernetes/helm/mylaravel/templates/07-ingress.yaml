@@ -1,0 +1,35 @@
+
+# 07 - Route external HTTP and HTTPS traffic to the Nginx Service.
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "mylaravel.fullname" . }}
+  labels:
+    {{- include "mylaravel.labels" . | nindent 4 }}
+
+spec:
+  # 01 - Select the installed Ingress-NGINX controller.
+  ingressClassName: {{ .Values.ingress.className | quote }}
+
+  # 02 - Define the hostname and route traffic to Nginx.
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "mylaravel.fullname" . }}-nginx
+                port:
+                  number: {{ .Values.service.nginx.port }}
+
+  # 03 - Enable TLS only when a TLS Secret is configured.
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName | quote }}
+  {{- end }}
+{{- end }}
