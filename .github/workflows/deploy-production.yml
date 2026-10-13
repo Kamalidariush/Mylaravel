@@ -126,11 +126,18 @@ jobs:
             command -v curl
             command -v jq
             test -f "$KUBECONFIG"
+            # Verify namespace-scoped deployment permissions.
+            test "$(kubectl auth can-i get deployments -n production)" = "yes"
+            test "$(kubectl auth can-i create deployments -n production)" = "yes"
+            test "$(kubectl auth can-i create services -n production)" = "yes"
+            test "$(kubectl auth can-i create configmaps -n production)" = "yes"
 
-            kubectl get namespace production
-            kubectl auth can-i get deployments -n production
-            kubectl auth can-i create secrets -n production
-
+            # Helm uses Secrets to store release information.
+            test "$(kubectl auth can-i get secrets -n production)" = "yes"
+            test "$(kubectl auth can-i list secrets -n production)" = "yes"
+            test "$(kubectl auth can-i create secrets -n production)" = "yes"
+            test "$(kubectl auth can-i update secrets -n production)" = "yes"
+            test "$(kubectl auth can-i delete secrets -n production)" = "yes"
             WORKDIR="/tmp/mylaravel-production-${IMAGE_TAG}"
             mkdir -p "$WORKDIR"
             tar -xzf /tmp/mylaravel-chart.tar.gz -C "$WORKDIR"
