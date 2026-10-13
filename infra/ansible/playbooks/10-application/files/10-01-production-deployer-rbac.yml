@@ -1,4 +1,3 @@
-```yaml
 # File: 10-01-production-deployer-rbac.yml
 # Path: infra/ansible/playbooks/10-application/files/10-01-production-deployer-rbac.yml
 # Purpose: Namespace-scoped permissions for Helm production releases.
@@ -81,4 +80,3 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: production-deployer
-```

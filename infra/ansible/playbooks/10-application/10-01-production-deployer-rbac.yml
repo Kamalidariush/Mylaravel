@@ -1,4 +1,3 @@
-```yaml
 # File: 10-01-production-deployer-rbac.yml
 # Path: infra/ansible/playbooks/10-application/10-01-production-deployer-rbac.yml
 # Purpose: Apply namespace-scoped RBAC for production application deployment.
@@ -43,4 +42,3 @@
     - name: Show production deployer RBAC
       ansible.builtin.debug:
         var: rbac_status.stdout_lines
-```
