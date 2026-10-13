@@ -1,0 +1,12 @@
+
+# 00 - Define Helm chart metadata and version.
+apiVersion: v2
+name: mylaravel
+description: Helm chart for deploying the MyLaravel application
+type: application
+
+# Chart version changes when chart templates or defaults change.
+version: 0.1.0
+
+# Application version is informational; Docker image tags are configured separately.
+appVersion: "1.0.0"

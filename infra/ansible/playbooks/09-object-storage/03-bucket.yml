@@ -1,0 +1,123 @@
+---
+# ---------------------------------------------------------
+# 03-bucket.yml
+# Path:
+#   infra/ansible/playbooks/09-object-storage/03-bucket.yml
+#
+# Purpose:
+#   Create the S3 bucket used by Laravel for uploaded files.
+#
+# Targets:
+#   k8s-1
+#
+# Namespace:
+#   object-storage
+#
+# Bucket:
+#   laravel-files
+#
+# Owner:
+#   laravel
+#
+# Access:
+#   Read
+#   Write
+#   List
+#   Tagging
+#
+# Storage:
+#   SeaweedFS Volume Server
+#   Longhorn-backed PVC
+#
+# Reclaim Policy:
+#   Retain
+#
+# Architecture:
+#   Laravel
+#      |
+#      | S3 API
+#      v
+#   seaweedfs-s3:8333
+#      |
+#      v
+#   laravel-files
+#      |
+#      v
+#   SeaweedFS Volume
+#      |
+#      v
+#   Longhorn PVC
+#
+# Important:
+#   Bucket data is retained if this Kubernetes Bucket CR
+#   is deleted.
+# ---------------------------------------------------------
+
+- name: "SeaweedFS Bucket | Create Laravel bucket"
+  hosts: k8s-1
+  become: false
+  gather_facts: false
+
+  vars:
+    seaweedfs_namespace: "object-storage"
+    seaweedfs_cluster: "seaweedfs"
+
+    seaweedfs_bucket: "laravel-files"
+    seaweedfs_owner: "laravel"
+
+  tasks:
+
+    - name: "SeaweedFS Bucket | Apply bucket"
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: |
+          apiVersion: seaweed.seaweedfs.com/v1
+          kind: Bucket
+          metadata:
+            name: {{ seaweedfs_bucket }}
+            namespace: {{ seaweedfs_namespace }}
+
+          spec:
+            clusterRef:
+              name: {{ seaweedfs_cluster }}
+
+            owner: {{ seaweedfs_owner }}
+
+            access:
+              - user: {{ seaweedfs_owner }}
+                actions:
+                  - Read
+                  - Write
+                  - List
+                  - Tagging
+
+            reclaimPolicy: Retain
+
+      register: seaweedfs_bucket_apply
+      changed_when: >
+        'created' in seaweedfs_bucket_apply.stdout or
+        'configured' in seaweedfs_bucket_apply.stdout
+
+    - name: "SeaweedFS Bucket | Wait for Ready"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ seaweedfs_namespace }}
+          get bucket {{ seaweedfs_bucket }}
+          -o jsonpath='{.status.phase}'
+      register: seaweedfs_bucket_status
+      changed_when: false
+      retries: 30
+      delay: 5
+      until: seaweedfs_bucket_status.stdout == "Ready"
+
+    - name: "SeaweedFS Bucket | Show bucket"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ seaweedfs_namespace }}
+          get bucket {{ seaweedfs_bucket }}
+      register: seaweedfs_bucket_result
+      changed_when: false
+
+    - name: "SeaweedFS Bucket | Show status"
+      ansible.builtin.debug:
+        msg: "{{ seaweedfs_bucket_result.stdout }}"

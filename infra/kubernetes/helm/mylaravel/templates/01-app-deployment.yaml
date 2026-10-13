@@ -1,0 +1,93 @@
+
+# 01 - Deploy the Laravel application using PHP-FPM.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mylaravel.fullname" . }}-app
+  labels:
+    {{- include "mylaravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+
+spec:
+  # 01 - Keep the configured number of PHP-FPM replicas running.
+  replicas: {{ .Values.replicaCount.app }}
+
+  # 02 - Identify Pods managed by this Deployment.
+  selector:
+    matchLabels:
+      {{- include "mylaravel.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+
+  template:
+    metadata:
+      labels:
+        {{- include "mylaravel.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: app
+
+    spec:
+      # 03 - Configure optional credentials for private image registries.
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        - name: app
+
+          # 04 - Use the PHP-FPM image and version configured in values.yaml.
+          image: "{{ .Values.image.app.repository }}:{{ .Values.image.app.tag }}"
+          imagePullPolicy: {{ .Values.image.app.pullPolicy }}
+
+          # 05 - Expose PHP-FPM to the internal application Service.
+          ports:
+            - name: fastcgi
+              containerPort: 9000
+              protocol: TCP
+
+          # 06 - Load non-sensitive configuration from the ConfigMap.
+          envFrom:
+            - configMapRef:
+                name: {{ include "mylaravel.fullname" . }}-config
+
+            # 07 - Load credentials from a Secret in the same namespace.
+            - secretRef:
+                name: {{ .Values.app.existingSecret }}
+
+          # 08 - Check whether PHP-FPM accepts TCP connections.
+          startupProbe:
+            tcpSocket:
+              port: fastcgi
+            periodSeconds: 5
+            failureThreshold: 30
+
+          readinessProbe:
+            tcpSocket:
+              port: fastcgi
+            periodSeconds: 10
+            failureThreshold: 3
+
+          livenessProbe:
+            tcpSocket:
+              port: fastcgi
+            periodSeconds: 20
+            failureThreshold: 3
+
+          # 09 - Apply resource requests and limits from values.yaml.
+          resources:
+            {{- toYaml .Values.resources.app | nindent 12 }}
+
+      # 10 - Apply optional node scheduling rules.
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,29 @@
+---
+# 04-kubernetes.yml
+# Master playbook for Kubernetes cluster.
+#
+# Execution order:
+#   00-init
+#   05-helm
+#   01-cni
+#   02-join-control-plane
+#   03-join-worker
+#   04-verify
+#
+# Usage:
+#   ansible-playbook -i inventory/production/hosts.yml \
+#     playbooks/04-kubernetes.yml -K
+
+- import_playbook: 04-kubernetes/00-init.yml
+
+# Helm must be installed before CNI,
+# because Cilium is deployed using Helm.
+- import_playbook: 04-kubernetes/05-helm.yml
+
+- import_playbook: 04-kubernetes/01-cni.yml
+
+- import_playbook: 04-kubernetes/02-join-control-plane.yml
+
+- import_playbook: 04-kubernetes/03-join-worker.yml
+
+- import_playbook: 04-kubernetes/04-verify.yml

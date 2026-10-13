@@ -1,0 +1,130 @@
+---
+# 00-prerequisites.yml
+#
+# Install Kubernetes packages on all Kubernetes nodes.
+#
+# This playbook:
+# 1. Adds the official Kubernetes APT repository
+# 2. Installs kubelet
+# 3. Installs kubeadm
+# 4. Installs kubectl
+# 5. Holds Kubernetes packages to prevent unintended upgrades
+#
+# Target:
+# - control_plane
+# - worker
+#
+# Excluded:
+# - load_balancer
+#
+# IMPORTANT:
+# This playbook does NOT pull Kubernetes container images.
+# The image repository used by kubeadm is configured separately
+# in 01-kubernetes-init.yml.
+#
+# Because of registry access restrictions, kubeadm will use:
+# registry.aliyuncs.com/google_containers
+#
+# Kubernetes version:
+# v1.34
+# This matches the Kubernetes 1.34 cluster architecture.
+
+- name: Install Kubernetes packages
+  hosts: "control_plane:worker"
+  become: true
+  gather_facts: true
+
+  vars:
+    # Kubernetes package repository.
+    # This is the official Kubernetes APT repository.
+    kubernetes_version: "v1.34"
+
+  tasks:
+
+    # ---------------------------------------------------------
+    # STEP 1 - Install APT prerequisites
+    # ---------------------------------------------------------
+
+    - name: Install repository prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gpg
+        state: present
+        update_cache: true
+
+    # ---------------------------------------------------------
+    # STEP 2 - Prepare Kubernetes APT keyring
+    # ---------------------------------------------------------
+
+    - name: Create Kubernetes keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download Kubernetes repository signing key
+      ansible.builtin.get_url:
+        url: "https://pkgs.k8s.io/core:/stable:/{{ kubernetes_version }}/deb/Release.key"
+        dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+        owner: root
+        group: root
+        mode: "0644"
+
+    # ---------------------------------------------------------
+    # STEP 3 - Configure Kubernetes APT repository
+    # ---------------------------------------------------------
+
+    - name: Configure Kubernetes repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc]
+          https://pkgs.k8s.io/core:/stable:/{{ kubernetes_version }}/deb/
+          /
+        filename: kubernetes
+        state: present
+
+    # ---------------------------------------------------------
+    # STEP 4 - Install Kubernetes components
+    # ---------------------------------------------------------
+
+    - name: Install kubelet kubeadm and kubectl
+      ansible.builtin.apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        update_cache: true
+
+    # ---------------------------------------------------------
+    # STEP 5 - Prevent automatic Kubernetes upgrades
+    # ---------------------------------------------------------
+
+    - name: Hold kubelet
+      ansible.builtin.dpkg_selections:
+        name: kubelet
+        selection: hold
+
+    - name: Hold kubeadm
+      ansible.builtin.dpkg_selections:
+        name: kubeadm
+        selection: hold
+
+    - name: Hold kubectl
+      ansible.builtin.dpkg_selections:
+        name: kubectl
+        selection: hold
+
+    # ---------------------------------------------------------
+    # STEP 6 - Enable kubelet
+    # ---------------------------------------------------------
+
+    - name: Enable kubelet service
+      ansible.builtin.systemd:
+        name: kubelet
+        enabled: true
+        state: started

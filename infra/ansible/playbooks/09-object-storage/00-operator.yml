@@ -1,0 +1,119 @@
+---
+# ---------------------------------------------------------
+# 00-operator.yml
+# Path:
+#   infra/ansible/playbooks/09-object-storage/00-operator.yml
+#
+# Purpose:
+#   Install the SeaweedFS Kubernetes Operator with Helm.
+#
+# Targets:
+#   k8s-1
+#
+# Namespace:
+#   seaweedfs-operator
+#
+# Architecture:
+#   Ansible -> Helm -> SeaweedFS Operator -> SeaweedFS CR
+#
+# Webhook:
+#   Enabled
+#
+# Webhook certgen image:
+#   Huawei Cloud mirror
+#
+# Important:
+#   registry.k8s.io is not directly accessible from the cluster.
+#   The webhook certgen image is therefore redirected to the
+#   same Huawei mirror used by the Kubernetes cluster.
+# ---------------------------------------------------------
+
+- name: "SeaweedFS Operator | Install"
+  hosts: k8s-1
+  become: false
+  gather_facts: false
+
+  vars:
+    seaweedfs_operator_namespace: "seaweedfs-operator"
+    seaweedfs_operator_release: "seaweedfs-operator"
+    seaweedfs_operator_chart: "seaweedfs-operator/seaweedfs-operator"
+    seaweedfs_operator_repo: "https://seaweedfs.github.io/seaweedfs-operator/"
+
+    # registry.k8s.io mirror used by this cluster.
+    webhook_certgen_registry: "swr.cn-north-4.myhuaweicloud.com/ddn-k8s/registry.k8s.io"
+    webhook_certgen_repository: "ingress-nginx/kube-webhook-certgen"
+    webhook_certgen_tag: "v20231011-8b53cabe0"
+
+  tasks:
+
+    - name: "SeaweedFS Operator | Add Helm repository"
+      ansible.builtin.command:
+        cmd: >
+          helm repo add seaweedfs-operator
+          {{ seaweedfs_operator_repo }}
+      register: seaweedfs_repo_add
+      changed_when: >
+        'already exists' not in
+        (seaweedfs_repo_add.stdout | lower)
+
+    - name: "SeaweedFS Operator | Update Helm repositories"
+      ansible.builtin.command:
+        cmd: helm repo update
+      changed_when: false
+
+    - name: "SeaweedFS Operator | Create namespace"
+      ansible.builtin.command:
+        cmd: >
+          kubectl create namespace
+          {{ seaweedfs_operator_namespace }}
+      register: seaweedfs_namespace
+      changed_when: seaweedfs_namespace.rc == 0
+      failed_when:
+        - seaweedfs_namespace.rc != 0
+        - "'AlreadyExists' not in seaweedfs_namespace.stderr"
+
+    - name: "SeaweedFS Operator | Install or upgrade"
+      ansible.builtin.command:
+        cmd: >
+          helm upgrade --install
+          {{ seaweedfs_operator_release }}
+          {{ seaweedfs_operator_chart }}
+          --namespace {{ seaweedfs_operator_namespace }}
+          --set webhook.enabled=true
+          --set webhook.certgen.registry={{ webhook_certgen_registry }}
+          --set webhook.certgen.repository={{ webhook_certgen_repository }}
+          --set webhook.certgen.tag={{ webhook_certgen_tag }}
+      register: seaweedfs_operator_install
+      changed_when: >
+        'deployed' in seaweedfs_operator_install.stdout or
+        'upgraded' in seaweedfs_operator_install.stdout
+
+    - name: "SeaweedFS Operator | Wait for deployment"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ seaweedfs_operator_namespace }}
+          rollout status
+          deployment/seaweedfs-operator
+          --timeout=10m
+      changed_when: false
+
+    - name: "SeaweedFS Operator | Verify deployment"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ seaweedfs_operator_namespace }}
+          get deployment seaweedfs-operator
+      register: seaweedfs_operator_deployment
+      changed_when: false
+
+    - name: "SeaweedFS Operator | Verify CRD"
+      ansible.builtin.command:
+        cmd: >
+          kubectl get crd seaweeds.seaweed.seaweedfs.com
+      register: seaweedfs_operator_crd
+      changed_when: false
+
+    - name: "SeaweedFS Operator | Show status"
+      ansible.builtin.debug:
+        msg:
+          - "{{ seaweedfs_operator_deployment.stdout }}"
+          - "{{ seaweedfs_operator_crd.stdout }}"

@@ -1,0 +1,93 @@
+---
+# 02-keepalived.yml
+#
+# Configure Keepalived / VRRP for the HAProxy servers.
+#
+# HAProxy-1:
+#   192.168.1.138
+#   MASTER
+#   Priority: 150
+#
+# HAProxy-2:
+#   192.168.1.140
+#   BACKUP
+#   Priority: 100
+#
+# Virtual IP:
+#   192.168.1.101
+#
+# Keepalived moves the VIP between the two HAProxy servers
+# when the active server becomes unavailable.
+#
+# Keepalived runs directly on the host because it must manage
+# the host network interface and VRRP VIP.
+#
+# HAProxy itself runs inside Docker using host networking.
+
+- name: Configure Keepalived
+  hosts: load_balancer
+  become: true
+  gather_facts: true
+
+  tasks:
+
+    # -------------------------------------------------------
+    # 1. Install Keepalived
+    # -------------------------------------------------------
+
+    - name: Install Keepalived
+      ansible.builtin.apt:
+        name: keepalived
+        state: present
+        update_cache: true
+
+    # -------------------------------------------------------
+    # 2. Create HAProxy health-check script
+    #
+    # Keepalived will use this script to determine whether
+    # HAProxy is actually running.
+    # -------------------------------------------------------
+
+    - name: Install HAProxy health-check script
+      ansible.builtin.copy:
+        dest: /usr/local/bin/check-haproxy.sh
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/bin/bash
+
+          # Verify that the HAProxy container is running.
+          docker inspect \
+            --format '{{ "{{.State.Running}}" }}' \
+            haproxy 2>/dev/null | grep -q true
+
+    # -------------------------------------------------------
+    # 3. Configure Keepalived
+    # -------------------------------------------------------
+
+    - name: Configure Keepalived
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../templates/03-high-availability/03-02-01-keepalived.conf.j2"
+        dest: /etc/keepalived/keepalived.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart Keepalived
+
+    # -------------------------------------------------------
+    # 4. Enable Keepalived
+    # -------------------------------------------------------
+
+    - name: Enable and start Keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        enabled: true
+        state: started
+
+  handlers:
+
+    - name: Restart Keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: restarted

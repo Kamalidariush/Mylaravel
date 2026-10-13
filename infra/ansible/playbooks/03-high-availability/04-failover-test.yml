@@ -1,0 +1,422 @@
+---
+# 04-failover-test.yml
+#
+# HAProxy + Keepalived Failover / Recovery Test
+#
+# WARNING:
+# This playbook intentionally stops HAProxy on the current
+# VIP owner to simulate a real HAProxy failure.
+#
+# Test flow:
+#
+#   1. Detect current VIP owner
+#   2. Stop HAProxy on current VIP owner
+#   3. Wait for VIP migration
+#   4. Verify VIP moved to backup
+#   5. Start HAProxy on original node
+#   6. Wait for HAProxy recovery
+#   7. Wait for VIP to return to MASTER
+#   8. Verify final HA state
+#
+# This playbook is intentionally separate from the normal
+# HA deployment Master Playbook.
+#
+# Normal deployment:
+#
+#   04-ha.yml
+#
+# Resilience test:
+#
+#   04-failover-test.yml
+
+
+# =========================================================
+# 1. Detect current VIP owner
+# =========================================================
+
+- name: "HA | Failover | Detect VIP owner"
+  hosts: load_balancer
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Check Kubernetes API VIP"
+      ansible.builtin.shell:
+        cmd: "ip addr show | grep -w '{{ keepalived_vip }}'"
+      register: vip_check
+      changed_when: false
+      failed_when: false
+
+    - name: "Set VIP ownership fact"
+      ansible.builtin.set_fact:
+        vip_owned: "{{ vip_check.rc == 0 }}"
+
+    - name: "Display current VIP state"
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          {{ 'VIP OWNER' if vip_owned else 'BACKUP' }}
+
+
+# =========================================================
+# 2. Select current VIP owner
+# =========================================================
+
+- name: "HA | Failover | Select VIP owner"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+
+    - name: "Initialize VIP owner"
+      ansible.builtin.set_fact:
+        vip_owner: ""
+
+    - name: "Find current VIP owner"
+      ansible.builtin.set_fact:
+        vip_owner: "{{ item }}"
+      loop: "{{ groups['load_balancer'] }}"
+      when:
+        - hostvars[item].vip_owned | default(false)
+
+    - name: "Verify VIP owner was detected"
+      ansible.builtin.assert:
+        that:
+          - vip_owner | length > 0
+        fail_msg: >-
+          FAILOVER TEST ABORTED:
+
+          No load balancer currently owns VIP
+          {{ hostvars[groups['load_balancer'][0]]['keepalived_vip'] }}.
+
+        success_msg: >-
+          Current VIP owner detected:
+          {{ vip_owner }}
+
+    - name: "Display current VIP owner"
+      ansible.builtin.debug:
+        msg: "Current VIP owner: {{ vip_owner }}"
+
+
+# =========================================================
+# 3. Stop HAProxy on current VIP owner
+# =========================================================
+
+- name: "HA | Failover | Simulate HAProxy failure"
+  hosts: load_balancer
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Stop HAProxy on current VIP owner"
+      ansible.builtin.command:
+        cmd: docker stop haproxy
+      when:
+        - inventory_hostname == hostvars['localhost']['vip_owner']
+
+    - name: "Display simulated failure"
+      ansible.builtin.debug:
+        msg:
+          - "HAProxy stopped intentionally."
+          - "Failed node: {{ inventory_hostname }}"
+      when:
+        - inventory_hostname == hostvars['localhost']['vip_owner']
+
+
+# =========================================================
+# 4. Wait for VIP to leave original node
+# =========================================================
+
+- name: "HA | Failover | Wait for VIP removal"
+  hosts: load_balancer
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Wait until VIP leaves original node"
+      ansible.builtin.shell:
+        cmd: "ip addr show | grep -w '{{ keepalived_vip }}'"
+      register: original_vip_check
+      changed_when: false
+      failed_when: false
+      retries: 15
+      delay: 2
+      until: original_vip_check.rc != 0
+      when:
+        - inventory_hostname == hostvars['localhost']['vip_owner']
+
+
+# =========================================================
+# 5. Wait for VIP on backup node
+# =========================================================
+
+- name: "HA | Failover | Wait for VIP takeover"
+  hosts: load_balancer
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Wait until backup receives VIP"
+      ansible.builtin.shell:
+        cmd: "ip addr show | grep -w '{{ keepalived_vip }}'"
+      register: backup_vip_check
+      changed_when: false
+      failed_when: false
+      retries: 15
+      delay: 2
+      until: backup_vip_check.rc == 0
+      when:
+        - inventory_hostname != hostvars['localhost']['vip_owner']
+
+
+# =========================================================
+# 6. Validate failover result
+# =========================================================
+
+- name: "HA | Failover | Validate takeover"
+  hosts: load_balancer
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Check VIP after failover"
+      ansible.builtin.shell:
+        cmd: "ip addr show | grep -w '{{ keepalived_vip }}'"
+      register: failover_vip_check
+      changed_when: false
+      failed_when: false
+
+    - name: "Set failover ownership fact"
+      ansible.builtin.set_fact:
+        failover_vip_owned: "{{ failover_vip_check.rc == 0 }}"
+
+    - name: "Display failover state"
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          {{
+            'VIP OWNER AFTER FAILOVER'
+            if failover_vip_owned
+            else
+            'NO VIP'
+          }}
+
+
+- name: "HA | Failover | Verify exactly one VIP owner"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+
+    - name: "Calculate VIP owners after failover"
+      ansible.builtin.set_fact:
+        failover_owner_count: >-
+          {{
+            groups['load_balancer']
+            | map('extract', hostvars, 'failover_vip_owned')
+            | select('equalto', true)
+            | list
+            | length
+          }}
+
+    - name: "Verify exactly one VIP owner"
+      ansible.builtin.assert:
+        that:
+          - failover_owner_count == 1
+          - >
+            hostvars[vip_owner].failover_vip_owned
+            | default(false)
+            == false
+        fail_msg: >-
+          FAILOVER TEST FAILED.
+
+          Expected:
+            - Original VIP owner loses VIP.
+            - Backup receives VIP.
+            - Exactly one VIP owner exists.
+
+          Actual VIP owner count:
+            {{ failover_owner_count }}
+
+        success_msg: >-
+          FAILOVER TEST PASSED.
+
+          VIP successfully moved away from
+          {{ vip_owner }} to the backup load balancer.
+
+
+# =========================================================
+# 7. Restore original HAProxy
+# =========================================================
+
+- name: "HA | Failover | Restore HAProxy"
+  hosts: load_balancer
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Start HAProxy on original VIP owner"
+      ansible.builtin.command:
+        cmd: docker start haproxy
+      when:
+        - inventory_hostname == hostvars['localhost']['vip_owner']
+
+    - name: "Display HAProxy recovery"
+      ansible.builtin.debug:
+        msg:
+          - "HAProxy recovery started."
+          - "Node: {{ inventory_hostname }}"
+      when:
+        - inventory_hostname == hostvars['localhost']['vip_owner']
+
+
+# =========================================================
+# 8. Verify HAProxy recovery
+# =========================================================
+
+- name: "HA | Failover | Verify HAProxy recovery"
+  hosts: load_balancer
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Wait for HAProxy container to become running"
+      ansible.builtin.command:
+        cmd: docker inspect --format "{{ '{{.State.Running}}' }}" haproxy
+      register: haproxy_state
+      changed_when: false
+      retries: 15
+      delay: 2
+      until:
+        - haproxy_state.rc == 0
+        - haproxy_state.stdout.strip() == "true"
+
+
+# =========================================================
+# 9. Wait for VIP to return to original MASTER
+# =========================================================
+
+- name: "HA | Failover | Wait for VIP recovery"
+  hosts: load_balancer
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Wait for VIP to return to original MASTER"
+      ansible.builtin.shell:
+        cmd: "ip addr show | grep -w '{{ keepalived_vip }}'"
+      register: restored_vip_check
+      changed_when: false
+      failed_when: false
+      retries: 15
+      delay: 2
+      until: restored_vip_check.rc == 0
+      when:
+        - inventory_hostname == hostvars['localhost']['vip_owner']
+
+
+# =========================================================
+# 10. Final HA verification
+# =========================================================
+
+- name: "HA | Failover | Final verification"
+  hosts: load_balancer
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Check final VIP ownership"
+      ansible.builtin.shell:
+        cmd: "ip addr show | grep -w '{{ keepalived_vip }}'"
+      register: final_vip_check
+      changed_when: false
+      failed_when: false
+
+    - name: "Set final VIP ownership fact"
+      ansible.builtin.set_fact:
+        final_vip_owned: "{{ final_vip_check.rc == 0 }}"
+
+    - name: "Display final HA state"
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          {{ 'VIP OWNER' if final_vip_owned else 'BACKUP' }}
+
+
+- name: "HA | Failover | Validate final state"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+
+    - name: "Calculate final VIP owner count"
+      ansible.builtin.set_fact:
+        final_owner_count: >-
+          {{
+            groups['load_balancer']
+            | map('extract', hostvars, 'final_vip_owned')
+            | select('equalto', true)
+            | list
+            | length
+          }}
+
+    - name: "Verify final HA state"
+      ansible.builtin.assert:
+        that:
+          - final_owner_count == 1
+          - hostvars[vip_owner].final_vip_owned | default(false)
+        fail_msg: >-
+          HA RECOVERY TEST FAILED.
+
+          Expected:
+            - Original MASTER recovered.
+            - Original MASTER owns the VIP.
+            - Exactly one VIP owner exists.
+
+          VIP owner count:
+            {{ final_owner_count }}
+
+        success_msg: >-
+          HA RECOVERY TEST PASSED.
+
+          Original MASTER recovered successfully.
+          VIP returned to {{ vip_owner }}.
+
+
+# =========================================================
+# 11. Final result
+# =========================================================
+
+- name: "HA | Failover | Completed"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+
+    - name: "Display final test result"
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "HA FAILOVER / RECOVERY TEST PASSED"
+          - "=============================================="
+          - "Original VIP owner: {{ vip_owner }}"
+          - "HAProxy failure: PASSED"
+          - "VIP migration: PASSED"
+          - "Backup takeover: PASSED"
+          - "HAProxy recovery: PASSED"
+          - "VIP recovery: PASSED"
+          - "Final VIP owner: {{ vip_owner }}"
+          - "=============================================="

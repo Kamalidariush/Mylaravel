@@ -1,0 +1,125 @@
+---
+# 00-init.yml
+#
+# Initialize the first Kubernetes control-plane node.
+#
+# This playbook:
+# 1. Runs kubeadm init on k8s-1
+# 2. Uses the HAProxy/Keepalived VIP as the Kubernetes API endpoint
+# 3. Configures the Pod network CIDR
+# 4. Uploads control-plane certificates for future control-plane joins
+# 5. Configures kubectl for the rayan user
+# 6. Verifies the Kubernetes API
+#
+# Target:
+# - k8s-1 only
+#
+# IMPORTANT:
+# - Kubernetes packages must already be installed.
+# - containerd must already be configured.
+# - HAProxy/Keepalived must already provide:
+#       192.168.1.101:6443
+# - CNI is installed separately by 01-cni.yml.
+# - Other control-plane and worker nodes join later.
+
+- name: "Kubernetes | 00 | Initialize first control plane"
+  hosts: k8s-1
+  become: true
+  gather_facts: true
+
+  vars:
+    kubernetes_api_vip: "192.168.1.101"
+    kubernetes_api_port: 6443
+    kubernetes_control_plane_endpoint: "{{ kubernetes_api_vip }}:{{ kubernetes_api_port }}"
+
+    kubernetes_pod_cidr: "10.244.0.0/16"
+
+    kubernetes_image_repository: "registry.aliyuncs.com/google_containers"
+
+    kubernetes_kubeconfig_user: "rayan"
+    kubernetes_kubeconfig_home: "/home/rayan"
+
+  tasks:
+
+    # -------------------------------------------------------
+    # 1. Check whether Kubernetes has already been initialized.
+    #
+    # /etc/kubernetes/admin.conf is created by kubeadm init.
+    # This makes the playbook idempotent and prevents running
+    # kubeadm init again on an existing cluster.
+    # -------------------------------------------------------
+
+    - name: "Kubernetes | Check existing cluster"
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: kubernetes_admin_conf
+
+    # -------------------------------------------------------
+    # 2. Initialize Kubernetes.
+    #
+    # The API endpoint points to the HAProxy/Keepalived VIP.
+    # This allows all future nodes to use the same endpoint.
+    # -------------------------------------------------------
+
+    - name: "Kubernetes | Initialize cluster with kubeadm"
+      ansible.builtin.command:
+        cmd: >
+          kubeadm init
+          --control-plane-endpoint "{{ kubernetes_control_plane_endpoint }}"
+          --pod-network-cidr "{{ kubernetes_pod_cidr }}"
+          --upload-certs
+          --image-repository "{{ kubernetes_image_repository }}"
+      register: kubeadm_init
+      when: not kubernetes_admin_conf.stat.exists
+
+      # kubeadm init changes the node and therefore is intentionally
+      # executed only when the cluster has not already been initialized.
+
+    # -------------------------------------------------------
+    # 3. Configure .kube directory for rayan.
+    # -------------------------------------------------------
+
+    - name: "Kubernetes | Create kubeconfig directory"
+      ansible.builtin.file:
+        path: "{{ kubernetes_kubeconfig_home }}/.kube"
+        state: directory
+        owner: "{{ kubernetes_kubeconfig_user }}"
+        group: "{{ kubernetes_kubeconfig_user }}"
+        mode: "0700"
+
+    # -------------------------------------------------------
+    # 4. Copy admin.conf to the rayan user's kubeconfig.
+    # -------------------------------------------------------
+
+    - name: "Kubernetes | Configure kubectl for rayan"
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ kubernetes_kubeconfig_home }}/.kube/config"
+        remote_src: true
+        owner: "{{ kubernetes_kubeconfig_user }}"
+        group: "{{ kubernetes_kubeconfig_user }}"
+        mode: "0600"
+
+    # -------------------------------------------------------
+    # 5. Verify Kubernetes API.
+    #
+    # kubectl uses the kubeconfig configured above.
+    # become_user makes the command run as rayan.
+    # -------------------------------------------------------
+
+    - name: "Kubernetes | Verify API server"
+      become_user: "{{ kubernetes_kubeconfig_user }}"
+      ansible.builtin.command:
+        cmd: kubectl get nodes
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig_home }}/.kube/config"
+      register: kubernetes_nodes
+      changed_when: false
+
+    # -------------------------------------------------------
+    # 6. Display the initial cluster state.
+    # -------------------------------------------------------
+
+    - name: "Kubernetes | Display cluster nodes"
+      ansible.builtin.debug:
+        var: kubernetes_nodes.stdout_lines

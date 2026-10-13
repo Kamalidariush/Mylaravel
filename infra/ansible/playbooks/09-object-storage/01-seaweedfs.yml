@@ -1,0 +1,163 @@
+---
+# ---------------------------------------------------------
+# 01-seaweedfs.yml
+# Path:
+#   infra/ansible/playbooks/09-object-storage/01-seaweedfs.yml
+#
+# Purpose:
+#   Deploy the SeaweedFS object-storage cluster through
+#   the SeaweedFS Kubernetes Operator.
+#
+# Targets:
+#   k8s-1
+#
+# Namespace:
+#   object-storage
+#
+# Storage:
+#   Longhorn
+#   1 Volume Server
+#   1 PVC
+#   PVC size: 6Gi
+#
+# Components:
+#   Master: 3 replicas
+#   Volume: 1 replica
+#   Filer: 2 replicas
+#   S3 Gateway: 1 replica
+#
+# S3:
+#   Port: 8333
+#   Internal service:
+#   seaweedfs-s3.object-storage.svc.cluster.local:8333
+#
+# Architecture:
+#   Laravel
+#      |
+#      v
+#   S3 Gateway
+#      |
+#      v
+#   Filer
+#      |
+#      v
+#   Volume Server
+#      |
+#      v
+#   Longhorn PVC (6Gi)
+#
+# Important:
+#   This file creates the SeaweedFS CR only.
+#   The Operator manages the resulting StatefulSets,
+#   Services and PVCs.
+# ---------------------------------------------------------
+
+- name: "SeaweedFS | Deploy object storage"
+  hosts: k8s-1
+  become: false
+  gather_facts: false
+
+  vars:
+    seaweedfs_namespace: "object-storage"
+    seaweedfs_name: "seaweedfs"
+
+    # Storage configuration.
+    seaweedfs_storage_class: "longhorn"
+    seaweedfs_volume_storage: "6Gi"
+
+    # SeaweedFS image.
+    seaweedfs_image: "chrislusf/seaweedfs:latest"
+
+  tasks:
+
+    - name: "SeaweedFS | Create namespace"
+      ansible.builtin.command:
+        cmd: >
+          kubectl create namespace {{ seaweedfs_namespace }}
+      register: seaweedfs_namespace_result
+      changed_when: seaweedfs_namespace_result.rc == 0
+      failed_when:
+        - seaweedfs_namespace_result.rc != 0
+        - "'AlreadyExists' not in seaweedfs_namespace_result.stderr"
+
+    - name: "SeaweedFS | Create Seaweed resource"
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: |
+          apiVersion: seaweed.seaweedfs.com/v1
+          kind: Seaweed
+          metadata:
+            name: {{ seaweedfs_name }}
+            namespace: {{ seaweedfs_namespace }}
+
+          spec:
+            image: {{ seaweedfs_image }}
+
+            volumeServerDiskCount: 1
+
+            master:
+              replicas: 3
+              volumeSizeLimitMB: 1024
+
+            volume:
+              replicas: 1
+              storageClassName: {{ seaweedfs_storage_class }}
+              requests:
+                storage: {{ seaweedfs_volume_storage }}
+
+            filer:
+              replicas: 2
+              config: |
+                [leveldb2]
+                enabled = true
+                dir = "/data/filerldb2"
+
+            s3:
+              replicas: 1
+      register: seaweedfs_apply
+      changed_when: >
+        'created' in seaweedfs_apply.stdout or
+        'configured' in seaweedfs_apply.stdout
+
+    - name: "SeaweedFS | Wait for cluster"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ seaweedfs_namespace }}
+          get seaweed {{ seaweedfs_name }}
+          --no-headers
+      register: seaweedfs_status
+      changed_when: false
+      retries: 30
+      delay: 10
+      until: seaweedfs_status.rc == 0
+
+    - name: "SeaweedFS | Show cluster"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ seaweedfs_namespace }}
+          get seaweed {{ seaweedfs_name }}
+      register: seaweedfs_cluster
+      changed_when: false
+
+    - name: "SeaweedFS | Show PVCs"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ seaweedfs_namespace }}
+          get pvc
+      register: seaweedfs_pvcs
+      changed_when: false
+
+    - name: "SeaweedFS | Show services"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ seaweedfs_namespace }}
+          get svc
+      register: seaweedfs_services
+      changed_when: false
+
+    - name: "SeaweedFS | Display status"
+      ansible.builtin.debug:
+        msg:
+          - "{{ seaweedfs_cluster.stdout }}"
+          - "{{ seaweedfs_pvcs.stdout }}"
+          - "{{ seaweedfs_services.stdout }}"

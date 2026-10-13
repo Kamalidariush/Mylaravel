@@ -1,0 +1,133 @@
+# 03-verify.yml
+#
+# Validation tests for the Kubernetes API High Availability layer.
+#
+# This playbook does NOT modify the HA configuration.
+# It only verifies that the HA layer is healthy.
+#
+# Checks:
+#   1. Docker service is active
+#   2. HAProxy container is running
+#   3. HAProxy configuration is valid
+#   4. Keepalived service is active
+#   5. VIP exists on exactly one load balancer
+#   6. Kubernetes API VIP port 6443 is reachable
+#
+# Expected architecture:
+#
+#   haproxy-1 (.138) ─┐
+#                     ├── VIP 192.168.1.101
+#   haproxy-2 (.140) ─┘
+#
+# Exactly ONE load balancer must own the VIP.
+
+# ---------------------------------------------------------
+# 1. Verify Docker, HAProxy and Keepalived
+# ---------------------------------------------------------
+
+- name: "HA | Verify | Services"
+  hosts: load_balancer
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    # -----------------------------------------------------
+    # Docker
+    # -----------------------------------------------------
+
+    - name: "Verify Docker service is active"
+      ansible.builtin.command:
+        cmd: systemctl is-active docker
+      register: docker_status
+      changed_when: false
+      failed_when:
+        - docker_status.rc != 0
+        - docker_status.stdout.strip() != "active"
+
+    # -----------------------------------------------------
+    # HAProxy container
+    # -----------------------------------------------------
+
+    - name: "Verify HAProxy container is running"
+      ansible.builtin.command:
+        cmd: docker inspect --format "{{ '{{.State.Running}}' }}" haproxy
+      register: haproxy_running
+      changed_when: false
+      failed_when:
+        - haproxy_running.rc != 0
+        - haproxy_running.stdout.strip() != "true"
+
+    # -----------------------------------------------------
+    # HAProxy configuration
+    # -----------------------------------------------------
+
+    - name: "Verify HAProxy configuration"
+      ansible.builtin.command:
+        cmd: docker exec haproxy haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
+      register: haproxy_config
+      changed_when: false
+
+    # -----------------------------------------------------
+    # Keepalived
+    # -----------------------------------------------------
+
+    - name: "Verify Keepalived service is active"
+      ansible.builtin.command:
+        cmd: systemctl is-active keepalived
+      register: keepalived_status
+      changed_when: false
+      failed_when:
+        - keepalived_status.rc != 0
+        - keepalived_status.stdout.strip() != "active"
+
+
+# ---------------------------------------------------------
+# 2. Verify VIP ownership
+# ---------------------------------------------------------
+
+- name: "HA | Verify | VIP Ownership"
+  hosts: load_balancer
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Check Kubernetes API VIP"
+      ansible.builtin.shell:
+        cmd: "ip addr show | grep -w '{{ keepalived_vip }}'"
+      register: vip_check
+      changed_when: false
+      failed_when: false
+
+    - name: "Set VIP ownership fact"
+      ansible.builtin.set_fact:
+        vip_owned: "{{ vip_check.rc == 0 }}"
+
+    - name: "Display VIP status"
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}:
+          {{ 'VIP PRESENT' if vip_owned else 'VIP NOT PRESENT' }}
+
+
+# ---------------------------------------------------------
+# 3. Verify exactly one VIP owner
+# ---------------------------------------------------------
+
+- name: "HA | Verify | VIP Count"
+  hosts: load_balancer
+  become: false
+  gather_facts: false
+
+  tasks:
+
+    - name: "Verify exactly one load balancer owns the VIP"
+      ansible.builtin.assert:
+        that:
+          - >
+            groups['load_balancer']
+            | map('extract', hostvars, 'vip_owned')
+            | select('equalto', true)
+            | list
+

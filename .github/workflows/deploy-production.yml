@@ -1,0 +1,235 @@
+
+# Production deployment: .github/workflows/deploy-production.yml
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Full 40-character SHA of the tested commit on main"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  packages: read
+
+concurrency:
+  group: mylaravel-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy Laravel to Production
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Validate image SHA
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid image SHA."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Verify successful Build for the same SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+
+          RESPONSE="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/build.yml/runs?head_sha=$IMAGE_TAG&per_page=100")"
+
+          MATCH="$(jq --arg sha "$IMAGE_TAG" '
+            [.workflow_runs[]
+              | select(
+                  .head_sha == $sha
+                  and .head_branch == "main"
+                  and .event == "push"
+                  and .conclusion == "success"
+                )
+            ] | length
+          ' <<< "$RESPONSE")"
+
+          if [[ "$MATCH" -lt 1 ]]; then
+            echo "No successful Build run found for this SHA on main."
+            exit 1
+          fi
+
+      - name: Validate Helm chart
+        run: |
+          set -euo pipefail
+
+          helm lint infra/kubernetes/helm/mylaravel
+
+          helm template mylaravel \
+            infra/kubernetes/helm/mylaravel \
+            --namespace production \
+            --set-string image.app.tag="${{ inputs.image_tag }}" \
+            --set-string image.nginx.tag="${{ inputs.image_tag }}" \
+            > rendered-production.yaml
+
+          grep -q 'image: ghcr.io/kamalidariush/mylaravel:${{ inputs.image_tag }}' rendered-production.yaml
+          grep -q 'image: ghcr.io/kamalidariush/mylaravel-nginx:${{ inputs.image_tag }}' rendered-production.yaml
+
+      - name: Package Helm chart
+        run: |
+          set -euo pipefail
+          tar -czf mylaravel-chart.tar.gz \
+            -C infra/kubernetes/helm mylaravel
+
+      - name: Copy chart to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: 1256
+          source: mylaravel-chart.tar.gz
+          target: /tmp/
+
+      - name: Deploy, verify health and rollback on failure
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: 1256
+          envs: IMAGE_TAG
+          command_timeout: 20m
+          script: |
+            set -Eeuo pipefail
+
+            export KUBECONFIG="$HOME/.kube/production-config"
+
+            command -v kubectl
+            command -v helm
+            command -v curl
+            command -v jq
+            test -f "$KUBECONFIG"
+            # Verify namespace-scoped deployment permissions.
+            test "$(kubectl auth can-i get deployments -n production)" = "yes"
+            test "$(kubectl auth can-i create deployments -n production)" = "yes"
+            test "$(kubectl auth can-i create services -n production)" = "yes"
+            test "$(kubectl auth can-i create configmaps -n production)" = "yes"
+
+            # Helm uses Secrets to store release information.
+            test "$(kubectl auth can-i get secrets -n production)" = "yes"
+            test "$(kubectl auth can-i list secrets -n production)" = "yes"
+            test "$(kubectl auth can-i create secrets -n production)" = "yes"
+            test "$(kubectl auth can-i update secrets -n production)" = "yes"
+            test "$(kubectl auth can-i delete secrets -n production)" = "yes"
+            WORKDIR="/tmp/mylaravel-production-${IMAGE_TAG}"
+            mkdir -p "$WORKDIR"
+            tar -xzf /tmp/mylaravel-chart.tar.gz -C "$WORKDIR"
+
+            CHART="$WORKDIR/mylaravel"
+
+            PREVIOUS_REVISION=""
+            if helm status mylaravel -n production >/dev/null 2>&1; then
+              PREVIOUS_REVISION="$(
+                helm history mylaravel -n production -o json |
+                jq -r '[.[] | select(.status == "deployed")][-1].revision // empty'
+              )"
+            fi
+
+            collect_diagnostics() {
+              echo "=== Deployments ==="
+              kubectl get deployments,pods,services -n production || true
+              echo "=== Recent events ==="
+              kubectl get events -n production \
+                --sort-by=.metadata.creationTimestamp | tail -n 60 || true
+              echo "=== Application logs ==="
+              kubectl logs deployment/mylaravel-app \
+                -n production --all-containers --tail=100 || true
+              kubectl logs deployment/mylaravel-nginx \
+                -n production --all-containers --tail=100 || true
+            }
+
+            helm upgrade --install mylaravel "$CHART" \
+              --namespace production \
+              --set-string image.app.tag="$IMAGE_TAG" \
+              --set-string image.nginx.tag="$IMAGE_TAG" \
+              --wait \
+              --atomic \
+              --timeout 10m
+
+            if ! kubectl rollout status deployment/mylaravel-app \
+                -n production --timeout=5m; then
+              collect_diagnostics
+              exit 1
+            fi
+
+            if ! kubectl rollout status deployment/mylaravel-nginx \
+                -n production --timeout=5m; then
+              collect_diagnostics
+              exit 1
+            fi
+
+            # Check the application through the internal Nginx Service.
+            kubectl port-forward \
+              -n production service/mylaravel-nginx \
+              18080:80 > /tmp/mylaravel-port-forward.log 2>&1 &
+            PF_PID=$!
+
+            cleanup_port_forward() {
+              kill "$PF_PID" 2>/dev/null || true
+              wait "$PF_PID" 2>/dev/null || true
+            }
+            trap cleanup_port_forward EXIT
+
+            HEALTHY=false
+            for attempt in $(seq 1 30); do
+              if ! kill -0 "$PF_PID" 2>/dev/null; then
+                break
+              fi
+
+              if curl --fail --silent --show-error \
+                  --max-time 3 http://127.0.0.1:18080/up \
+                  -o /dev/null; then
+                HEALTHY=true
+                break
+              fi
+
+              sleep 2
+            done
+
+            if [[ "$HEALTHY" != "true" ]]; then
+              echo "Post-deployment health check failed."
+              collect_diagnostics
+              cat /tmp/mylaravel-port-forward.log || true
+
+              cleanup_port_forward
+              trap - EXIT
+
+              if [[ -n "$PREVIOUS_REVISION" ]]; then
+                helm rollback mylaravel "$PREVIOUS_REVISION" \
+                  --namespace production \
+                  --wait --timeout 10m
+              else
+                helm uninstall mylaravel --namespace production --wait
+              fi
+
+              exit 1
+            fi
+
+            echo "Production deployment and HTTP health check succeeded."

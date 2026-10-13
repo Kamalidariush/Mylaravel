@@ -1,0 +1,103 @@
+---
+# 04-kubernetes/04-verify.yml
+# Final verification of Kubernetes HA cluster.
+#
+# Architecture:
+#   VIP 192.168.1.101:6443
+#       ↓
+#   HAProxy
+#       ↓
+#   k8s-1 / k8s-2 / k8s-3
+#
+# This playbook is read-only.
+
+- name: Verify Kubernetes API through HAProxy
+  hosts: control_plane
+  become: true
+  gather_facts: false
+
+  vars:
+    kubernetes_api_vip: "192.168.1.101"
+    kubernetes_api_port: "6443"
+
+  tasks:
+
+    - name: "Kubernetes HA | Test API VIP connectivity"
+      ansible.builtin.wait_for:
+        host: "{{ kubernetes_api_vip }}"
+        port: "{{ kubernetes_api_port }}"
+        timeout: 10
+        state: started
+
+    - name: "Kubernetes HA | Query API version through VIP"
+      ansible.builtin.command:
+        cmd: >
+          kubectl
+          --kubeconfig=/etc/kubernetes/admin.conf
+          --server=https://{{ kubernetes_api_vip }}:{{ kubernetes_api_port }}
+          get --raw=/version
+      register: api_version
+      changed_when: false
+
+    - name: "Kubernetes HA | Display API response"
+      ansible.builtin.debug:
+        msg:
+          node: "{{ inventory_hostname }}"
+          api: "{{ kubernetes_api_vip }}:{{ kubernetes_api_port }}"
+          response: "{{ api_version.stdout }}"
+
+
+- name: Verify Kubernetes cluster
+  hosts: k8s-1
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Cluster | Get nodes"
+      ansible.builtin.command:
+        cmd: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cluster_nodes
+      changed_when: false
+
+    - name: "Cluster | Display nodes"
+      ansible.builtin.debug:
+        var: cluster_nodes.stdout_lines
+
+    - name: "Cluster | Get Cilium pods"
+      ansible.builtin.command:
+        cmd: kubectl -n kube-system get pods -l k8s-app=cilium -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cilium_pods
+      changed_when: false
+
+    - name: "Cluster | Display Cilium"
+      ansible.builtin.debug:
+        var: cilium_pods.stdout_lines
+
+    - name: "Cluster | Get etcd pods"
+      ansible.builtin.command:
+        cmd: kubectl -n kube-system get pods -l component=etcd -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: etcd_pods
+      changed_when: false
+
+    - name: "Cluster | Display etcd"
+      ansible.builtin.debug:
+        var: etcd_pods.stdout_lines
+
+    - name: "Cluster | Get API server pods"
+      ansible.builtin.command:
+        cmd: kubectl -n kube-system get pods -l component=kube-apiserver -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: api_server_pods
+      changed_when: false
+
+    - name: "Cluster | Display API servers"
+      ansible.builtin.debug:
+        var: api_server_pods.stdout_lines

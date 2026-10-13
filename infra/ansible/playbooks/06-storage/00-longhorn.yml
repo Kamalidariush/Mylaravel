@@ -1,0 +1,112 @@
+---
+# ---------------------------------------------------------
+# 00-longhorn.yml
+# Path:
+#   infra/ansible/playbooks/06-storage/00-longhorn.yml
+#
+# Purpose:
+#   Prepare Kubernetes nodes and install Longhorn.
+#
+# Targets:
+#   k8s-1
+#   k8s-2
+#   k8s-3
+#   k8s-4
+#
+# Architecture:
+#   Kubernetes Storage
+#       ↓
+#   Longhorn
+#       ↓
+#   PersistentVolume
+#       ↓
+#   PersistentVolumeClaim
+#
+# Important:
+#   Longhorn requires node-level storage prerequisites.
+#
+# This playbook will:
+#
+#   1. Install required Longhorn packages.
+#   2. Verify required kernel modules.
+#   3. Verify iSCSI availability.
+#   4. Verify node storage.
+#   5. Install Longhorn using Helm.
+#   6. Wait for Longhorn components.
+#   7. Verify Longhorn health.
+#
+# ---------------------------------------------------------
+
+- name: "Longhorn | Prepare Kubernetes nodes"
+  hosts:
+    - control_plane
+    - worker
+  become: true
+  gather_facts: true
+
+  tasks:
+
+    - name: "Longhorn | Install required packages"
+      ansible.builtin.apt:
+        name:
+          - open-iscsi
+          - nfs-common
+          - cryptsetup
+        state: present
+        update_cache: true
+
+    - name: "Longhorn | Enable iSCSI service"
+      ansible.builtin.systemd:
+        name: iscsid
+        enabled: true
+        state: started
+
+    - name: "Longhorn | Load required kernel module"
+      community.general.modprobe:
+        name: iscsi_tcp
+        state: present
+
+    - name: "Longhorn | Persist required kernel module"
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/longhorn.conf
+        mode: "0644"
+        content: |
+          iscsi_tcp
+
+- name: "Longhorn | Install Longhorn"
+  hosts: k8s-1
+  become: false
+  gather_facts: false
+
+  tasks:
+
+    - name: "Longhorn | Add Helm repository"
+      ansible.builtin.command:
+        cmd: >
+          helm repo add longhorn
+          https://charts.longhorn.io
+      register: longhorn_repo
+      changed_when: "'already exists' not in longhorn_repo.stdout"
+
+    - name: "Longhorn | Update Helm repositories"
+      ansible.builtin.command:
+        cmd: helm repo update
+
+    - name: "Longhorn | Install or upgrade Longhorn"
+      ansible.builtin.command:
+        cmd: >
+          helm upgrade --install longhorn longhorn/longhorn
+          --namespace longhorn-system
+          --create-namespace
+          --set defaultSettings.defaultReplicaCount=3
+          --wait
+          --timeout 15m
+
+    - name: "Longhorn | Wait for Longhorn pods"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n longhorn-system
+          wait --for=condition=Ready pod
+          --all
+          --timeout=15m
+      changed_when: false

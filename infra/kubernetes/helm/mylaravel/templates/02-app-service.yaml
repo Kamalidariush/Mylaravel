@@ -1,0 +1,25 @@
+
+# 02 - Expose PHP-FPM internally to other Kubernetes workloads.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mylaravel.fullname" . }}-app
+  labels:
+    {{- include "mylaravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+
+spec:
+  # 01 - Keep PHP-FPM accessible only inside the cluster.
+  type: {{ .Values.service.app.type }}
+
+  # 02 - Forward Service traffic to the PHP-FPM container port.
+  ports:
+    - name: fastcgi
+      port: {{ .Values.service.app.port }}
+      targetPort: fastcgi
+      protocol: TCP
+
+  # 03 - Select only the Laravel application Pods.
+  selector:
+    {{- include "mylaravel.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: app

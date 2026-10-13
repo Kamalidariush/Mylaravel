@@ -1,0 +1,120 @@
+# File: 10-01-production-deployer-rbac.yml
+# Path: infra/ansible/playbooks/10-application/files/10-01-production-deployer-rbac.yml
+# Purpose: Namespace-scoped RBAC for Helm production deployment and diagnostics.
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: production-deployer
+  namespace: production
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: production-deployer
+  namespace: production
+rules:
+  # Helm release metadata. Note: this also grants access to Secrets in production.
+  - apiGroups: [""]
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - patch
+      - delete
+
+  # Resources managed by the Helm chart.
+  - apiGroups: [""]
+    resources:
+      - services
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+  # Pods and ReplicaSets are read-only for rollout checks and diagnostics.
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+
+  - apiGroups: [""]
+    resources:
+      - pods/log
+    verbs:
+      - get
+
+  # Required by the deployment health check using kubectl port-forward.
+  - apiGroups: [""]
+    resources:
+      - pods/portforward
+    verbs:
+      - create
+
+  - apiGroups: ["apps"]
+    resources:
+      - replicasets
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Required to diagnose failed deployments.
+  - apiGroups: [""]
+    resources:
+      - events
+    verbs:
+      - list
+
+  # Ingress resources, when enabled in the chart.
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: production-deployer
+  namespace: production
+subjects:
+  - kind: ServiceAccount
+    name: production-deployer
+    namespace: production
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: production-deployer

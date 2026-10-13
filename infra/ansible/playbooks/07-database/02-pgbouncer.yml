@@ -1,0 +1,115 @@
+---
+# ---------------------------------------------------------
+# 07-02-pgbouncer.yml
+# Path:
+#   infra/ansible/playbooks/07-database/02-pgbouncer.yml
+#
+# Purpose:
+#   Create a PgBouncer connection pooler managed by
+#   CloudNativePG Operator.
+#
+# Targets:
+#   k8s-1
+#
+# Namespace:
+#   database
+#
+# PostgreSQL Cluster:
+#   postgres
+#
+# Pooler:
+#   postgres-pgbouncer
+#
+# Mode:
+#   transaction
+#
+# Service Port:
+#   5432
+#
+# Architecture:
+#   Laravel -> PgBouncer -> CloudNativePG PostgreSQL
+# ---------------------------------------------------------
+
+- name: "PostgreSQL | Deploy PgBouncer"
+  hosts: k8s-1
+  become: false
+  gather_facts: false
+
+  vars:
+
+    postgres_namespace: "database"
+    postgres_cluster: "postgres"
+    pgbouncer_name: "postgres-pgbouncer"
+
+  tasks:
+
+    # -----------------------------------------------------
+    # Create PgBouncer Pooler
+    # -----------------------------------------------------
+
+    - name: "PgBouncer | Create Pooler resource"
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: |
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Pooler
+          metadata:
+            name: {{ pgbouncer_name }}
+            namespace: {{ postgres_namespace }}
+          spec:
+            cluster:
+              name: {{ postgres_cluster }}
+            instances: 2
+            type: rw
+            pgbouncer:
+              poolMode: transaction
+      register: pgbouncer_apply
+      changed_when: >
+        'created' in pgbouncer_apply.stdout or
+        'configured' in pgbouncer_apply.stdout
+
+    # -----------------------------------------------------
+    # Wait for PgBouncer
+    # -----------------------------------------------------
+
+    # -----------------------------------------------------
+    # Wait for PgBouncer pods
+    # -----------------------------------------------------
+
+    - name: "PgBouncer | Wait for PgBouncer pods"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ postgres_namespace }}
+          wait
+          --for=jsonpath='{.status.phase}'=Running
+          pods
+          -l cnpg.io/poolerName={{ pgbouncer_name }}
+          --timeout=10m
+      changed_when: false
+
+    # -----------------------------------------------------
+    # Verify PgBouncer service
+    # -----------------------------------------------------
+
+    - name: "PgBouncer | Verify service"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ postgres_namespace }}
+          get service {{ pgbouncer_name }}
+      register: pgbouncer_service
+      changed_when: false
+    # -----------------------------------------------------
+    # Verify resources
+    # -----------------------------------------------------
+
+    - name: "PgBouncer | Show Pooler resources"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ postgres_namespace }}
+          get pooler,pods,svc
+      register: pgbouncer_resources
+      changed_when: false
+
+    - name: "PgBouncer | Display resources"
+      ansible.builtin.debug:
+        var: pgbouncer_resources.stdout_lines

@@ -1,0 +1,44 @@
+# File: 10-01-production-deployer-rbac.yml
+# Path: infra/ansible/playbooks/10-application/10-01-production-deployer-rbac.yml
+# Purpose: Apply namespace-scoped RBAC for production application deployment.
+
+---
+- name: Configure production deployer RBAC
+  hosts: k8s-1
+  become: false
+  gather_facts: false
+
+  tasks:
+    - name: Copy production deployer RBAC manifest
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/files/10-01-production-deployer-rbac.yml"
+        dest: /tmp/10-01-production-deployer-rbac.yml
+        owner: "{{ ansible_user | default(omit) }}"
+        mode: "0600"
+
+    - name: Apply production deployer RBAC
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - apply
+          - -f
+          - /tmp/10-01-production-deployer-rbac.yml
+      register: rbac_apply
+      changed_when: >-
+        'created' in rbac_apply.stdout or
+        'configured' in rbac_apply.stdout
+
+    - name: Verify production deployer RBAC
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - get
+          - serviceaccounts,roles,rolebindings
+          - -n
+          - production
+      register: rbac_status
+      changed_when: false
+
+    - name: Show production deployer RBAC
+      ansible.builtin.debug:
+        var: rbac_status.stdout_lines

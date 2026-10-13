@@ -1,0 +1,42 @@
+---
+# 00-bootstrap.yml
+# Master Bootstrap Playbook
+#
+# Purpose:
+# Run the complete initial infrastructure setup in the correct order.
+#
+# Execution order:
+# 1. Configure passwordless SSH
+# 2. Prepare Kubernetes nodes
+#
+# HAProxy is intentionally excluded from Kubernetes system preparation
+# because it runs separately using Docker Compose.
+
+# ============================================================
+# STEP 1 - SSH Bootstrap
+# ============================================================
+# Configure SSH key-based authentication so Ansible can manage
+# all infrastructure nodes without requiring an SSH password.
+
+- name: "STEP 1 - Configure passwordless SSH"
+  ansible.builtin.import_playbook: 00-bootstrap/00-ssh.yml
+
+
+# ============================================================
+# STEP 2 - System Bootstrap
+# ============================================================
+# Prepare Kubernetes nodes before installing containerd and Kubernetes.
+#
+# This step:
+# - Updates APT repositories
+# - Installs required system packages
+# - Enables time synchronization
+# - Disables swap
+# - Loads Kubernetes kernel modules
+# - Configures required kernel networking parameters
+#
+# Only control-plane and worker nodes are targeted.
+# HAProxy is excluded.
+
+- name: "STEP 2 - Prepare Kubernetes systems"
+  ansible.builtin.import_playbook: 00-bootstrap/01-system.yml

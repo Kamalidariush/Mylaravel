@@ -1,0 +1,159 @@
+# 00-containerd.yml
+# Path: infra/ansible/playbooks/01-container/00-containerd.yml
+#
+# Install and configure containerd as the Kubernetes container runtime.
+#
+# Target:
+# - control_plane
+# - worker
+#
+# Excluded:
+# - load_balancer
+#
+# This playbook:
+# 1. Installs containerd
+# 2. Creates the default containerd configuration
+# 3. Configures systemd cgroups for Kubernetes
+# 4. Configures the Kubernetes pause/sandbox image
+#    to use the accessible Aliyun registry
+# 5. Enables containerd
+# 6. Ensures containerd is running
+# 7. Verifies the sandbox image configuration
+#
+# IMPORTANT:
+# registry.k8s.io is NOT configured as a global containerd mirror.
+#
+# Kubernetes images are configured explicitly by kubeadm to use:
+#
+#   registry.aliyuncs.com/google_containers
+#
+# Ingress-NGINX images are configured separately by Helm
+# because their mirror uses a different registry path.
+
+- name: "Containerd | Install and configure containerd"
+  hosts: "control_plane:worker"
+  become: true
+  gather_facts: true
+
+  vars:
+
+    # Kubernetes pause/sandbox image.
+    containerd_sandbox_image: "registry.aliyuncs.com/google_containers/pause:3.10.1"
+
+  tasks:
+
+    # ---------------------------------------------------------
+    # Install containerd
+    # ---------------------------------------------------------
+
+    - name: "Containerd | Install containerd"
+      ansible.builtin.apt:
+        name: containerd
+        state: present
+        update_cache: true
+
+    # ---------------------------------------------------------
+    # Containerd configuration directory
+    # ---------------------------------------------------------
+
+    - name: "Containerd | Ensure configuration directory exists"
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        mode: "0755"
+
+    # ---------------------------------------------------------
+    # Generate default configuration
+    # ---------------------------------------------------------
+
+    - name: "Containerd | Generate default configuration"
+      ansible.builtin.shell:
+        cmd: containerd config default > /etc/containerd/config.toml
+      args:
+        creates: /etc/containerd/config.toml
+
+    # ---------------------------------------------------------
+    # Kubernetes cgroup configuration
+    # ---------------------------------------------------------
+    #
+    # Kubernetes should use systemd as the cgroup driver.
+    #
+
+    - name: "Containerd | Configure systemd cgroup driver"
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+      notify: Restart containerd
+
+    # ---------------------------------------------------------
+    # Kubernetes sandbox / pause image
+    # ---------------------------------------------------------
+    #
+    # containerd 2.x uses:
+    #
+    #     sandbox = '...'
+    #
+    # The default registry.k8s.io is not accessible
+    # in this environment.
+    #
+    # Therefore Kubernetes Pod sandbox images use:
+    #
+    #     registry.aliyuncs.com/google_containers/pause:3.10.1
+    #
+
+    - name: "Containerd | Configure Kubernetes sandbox image"
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: "sandbox = 'registry\\.k8s\\.io/pause:3\\.10\\.1'"
+        replace: "sandbox = '{{ containerd_sandbox_image }}'"
+      notify: Restart containerd
+
+    # ---------------------------------------------------------
+    # Enable containerd
+    # ---------------------------------------------------------
+
+    - name: "Containerd | Enable containerd service"
+      ansible.builtin.systemd:
+        name: containerd
+        enabled: true
+
+    # ---------------------------------------------------------
+    # Ensure containerd is running
+    # ---------------------------------------------------------
+
+    - name: "Containerd | Ensure containerd is running"
+      ansible.builtin.systemd:
+        name: containerd
+        state: started
+
+    # ---------------------------------------------------------
+    # Verify Kubernetes sandbox image
+    # ---------------------------------------------------------
+
+    - name: "Containerd | Read configured sandbox image"
+      ansible.builtin.shell:
+        cmd: grep -E "^[[:space:]]*sandbox[[:space:]]*=" /etc/containerd/config.toml
+      register: containerd_sandbox_config
+      changed_when: false
+
+    - name: "Containerd | Verify sandbox image"
+      ansible.builtin.assert:
+        that:
+          - containerd_sandbox_image in containerd_sandbox_config.stdout
+        fail_msg: >-
+          Containerd sandbox image is not configured correctly.
+          Expected: {{ containerd_sandbox_image }}
+          Found: {{ containerd_sandbox_config.stdout }}
+        success_msg: >-
+          Containerd sandbox image is correctly configured:
+          {{ containerd_sandbox_config.stdout }}
+
+  handlers:
+
+    # Restart containerd only when configuration changes.
+    - name: "Restart containerd"
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted
+

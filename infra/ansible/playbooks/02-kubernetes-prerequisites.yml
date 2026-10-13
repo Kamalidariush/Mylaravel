@@ -1,0 +1,52 @@
+---
+# 02-kubernetes.yml
+# Master Playbook for Kubernetes cluster installation.
+#
+# Execution order:
+# 1. Install Kubernetes packages
+# 2. Initialize the first control-plane
+# 3. Join additional control-plane and worker nodes
+# 4. Install the Kubernetes CNI
+#
+# Target:
+# - control_plane
+# - worker
+#
+# Excluded:
+# - load_balancer
+
+# ============================================================
+# STEP 1 - Kubernetes Prerequisites
+# ============================================================
+# Install kubeadm, kubelet and kubectl and prepare the nodes.
+
+- name: "STEP 1 - Kubernetes prerequisites"
+  ansible.builtin.import_playbook: 02-kubernetes-prerequisites/00-prerequisites.yml
+
+
+# ============================================================
+# STEP 2 - Initialize Control Plane
+# ============================================================
+# Initialize k8s-1 as the first Kubernetes control-plane node.
+
+- name: "STEP 2 - Initialize first control plane"
+  ansible.builtin.import_playbook: 02-kubernetes/01-kubernetes-init.yml
+
+
+# ============================================================
+# STEP 3 - Join Cluster Nodes
+# ============================================================
+# Join k8s-2, k8s-3 and k8s-4 to the existing cluster.
+
+- name: "STEP 3 - Join Kubernetes nodes"
+  ansible.builtin.import_playbook: 02-kubernetes/02-kubernetes-join.yml
+
+
+# ============================================================
+# STEP 4 - Install CNI
+# ============================================================
+# Install the Kubernetes network plugin so pods can communicate
+# with each other across cluster nodes.
+
+- name: "STEP 4 - Install Kubernetes CNI"
+  ansible.builtin.import_playbook: 02-kubernetes/03-cni.yml

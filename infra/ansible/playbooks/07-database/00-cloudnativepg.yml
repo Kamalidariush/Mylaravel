@@ -1,0 +1,102 @@
+---
+# ---------------------------------------------------------
+# 07-00-cloudnativepg.yml
+# Path:
+#   infra/ansible/playbooks/07-database/00-cloudnativepg.yml
+#
+# Purpose:
+#   Install CloudNativePG Operator for PostgreSQL HA.
+#
+# Targets:
+#   k8s-1
+#
+# Architecture:
+#
+#   Kubernetes
+#        ↓
+#   CloudNativePG Operator
+#        ↓
+#   PostgreSQL Cluster
+#        ↓
+#   Longhorn Persistent Volumes
+#
+# Version:
+#   CloudNativePG 1.30.1
+#
+# Namespace:
+#   cnpg-system
+#
+# Important:
+#   This playbook installs only the operator.
+#   PostgreSQL Cluster will be created in the next step.
+#
+# ---------------------------------------------------------
+
+- name: "CloudNativePG | Install operator"
+  hosts: k8s-1
+  become: false
+  gather_facts: false
+
+  vars:
+
+    cnpg_namespace: "cnpg-system"
+    cnpg_release: "cnpg"
+    cnpg_chart: "cnpg/cloudnative-pg"
+
+    # CloudNativePG operator version.
+    cnpg_operator_version: "1.30.1"
+
+    # Helm chart version.
+    cnpg_chart_version: "0.29.1"
+
+  tasks:
+
+    # -----------------------------------------------------
+    # Helm repository
+    # -----------------------------------------------------
+
+    - name: "CloudNativePG | Add Helm repository"
+      ansible.builtin.command:
+        cmd: >
+          helm repo add cnpg
+          https://cloudnative-pg.github.io/charts
+      register: cnpg_repo
+      changed_when: "'already exists' not in cnpg_repo.stdout"
+
+    - name: "CloudNativePG | Update Helm repositories"
+      ansible.builtin.command:
+        cmd: helm repo update
+
+    # -----------------------------------------------------
+    # Operator installation
+    # -----------------------------------------------------
+
+    - name: "CloudNativePG | Install or upgrade operator"
+      ansible.builtin.command:
+        cmd: >
+          helm upgrade --install {{ cnpg_release }} {{ cnpg_chart }}
+          --namespace {{ cnpg_namespace }}
+          --create-namespace
+          --version {{ cnpg_chart_version }}
+          --wait
+          --timeout 10m
+    # -----------------------------------------------------
+    # Verification
+    # -----------------------------------------------------
+
+    - name: "CloudNativePG | Wait for operator deployment"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ cnpg_namespace }}
+          rollout status deployment/cnpg-cloudnative-pg
+          --timeout=10m
+      changed_when: false
+
+    - name: "CloudNativePG | Verify operator pods"
+      ansible.builtin.command:
+        cmd: >
+          kubectl -n {{ cnpg_namespace }}
+          get pods
+          -l app.kubernetes.io/name=cloudnative-pg
+          -o wide
+      changed_when: false

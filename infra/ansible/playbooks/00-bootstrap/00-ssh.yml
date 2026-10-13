@@ -1,0 +1,24 @@
+---
+# 00-ssh.yml
+# Configure passwordless SSH access using the controller's public key.
+
+- name: Configure passwordless SSH
+  hosts: all
+  become: false
+  gather_facts: false
+
+  tasks:
+
+    - name: Ensure SSH directory exists
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user }}/.ssh"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0700"
+
+    - name: Install controller SSH public key
+      ansible.posix.authorized_key:
+        user: "{{ ansible_user }}"
+        key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub') }}"
+        state: present

@@ -1,0 +1,135 @@
+---
+# 04-kubernetes/03-join-worker.yml
+# Join worker nodes to the Kubernetes cluster.
+#
+# Worker:
+#   k8s-4 = 192.168.1.137
+#
+# Kubernetes API:
+#   192.168.1.101:6443
+#
+# The join token and CA hash are generated on k8s-1.
+
+- name: Prepare Kubernetes worker join
+  hosts: k8s-1
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Worker Join | Create kubeadm bootstrap token"
+      ansible.builtin.command:
+        cmd: kubeadm token create
+      register: worker_join_token
+      changed_when: false
+
+    - name: "Worker Join | Calculate Kubernetes CA certificate hash"
+      ansible.builtin.shell:
+        cmd: |
+          openssl x509 \
+            -pubkey \
+            -in /etc/kubernetes/pki/ca.crt \
+          | openssl rsa \
+            -pubin \
+            -outform der 2>/dev/null \
+          | openssl dgst \
+            -sha256 \
+            -hex \
+          | sed 's/^.* //'
+      register: ca_cert_hash
+      changed_when: false
+
+    - name: "Worker Join | Store join credentials"
+      ansible.builtin.set_fact:
+        control_plane_join_token: "{{ worker_join_token.stdout }}"
+        control_plane_ca_hash: "sha256:{{ ca_cert_hash.stdout }}"
+
+
+- name: Join Kubernetes worker
+  hosts: worker
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Worker Join | Check kubelet configuration"
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_config
+
+    - name: "Worker Join | Check Kubernetes node state"
+      ansible.builtin.command:
+        cmd: kubectl get nodes --no-headers
+      delegate_to: k8s-1
+      become: true
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: existing_nodes
+      changed_when: false
+      failed_when: false
+
+    - name: "Worker Join | Detect existing worker"
+      ansible.builtin.set_fact:
+        worker_already_joined: >-
+          {{
+            kubelet_config.stat.exists
+            or
+            (inventory_hostname in existing_nodes.stdout)
+          }}
+
+    - name: "Worker Join | Join worker node"
+      ansible.builtin.command:
+        cmd: >
+          kubeadm join 192.168.1.101:6443
+          --token {{ hostvars['k8s-1']['control_plane_join_token'] }}
+          --discovery-token-ca-cert-hash {{ hostvars['k8s-1']['control_plane_ca_hash'] }}
+      when: not worker_already_joined
+
+    - name: "Worker Join | Enable kubelet"
+      ansible.builtin.systemd:
+        name: kubelet
+        enabled: true
+        state: started
+
+    - name: "Worker Join | Verify kubelet configuration"
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: worker_kubelet_config
+
+    - name: "Worker Join | Verify kubelet configuration exists"
+      ansible.builtin.assert:
+        that:
+          - worker_kubelet_config.stat.exists
+        fail_msg: "kubelet.conf was not created on {{ inventory_hostname }}"
+        success_msg: "kubelet.conf exists on {{ inventory_hostname }}"
+
+
+- name: Verify worker node
+  hosts: k8s-1
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: "Worker Join | Wait for k8s-4 to become Ready"
+      ansible.builtin.command:
+        cmd: kubectl get node k8s-4 -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: worker_ready
+      retries: 30
+      delay: 10
+      until: worker_ready.stdout == "True"
+      changed_when: false
+
+    - name: "Worker Join | Get cluster nodes"
+      ansible.builtin.command:
+        cmd: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cluster_nodes
+      changed_when: false
+
+    - name: "Worker Join | Display cluster nodes"
+      ansible.builtin.debug:
+        var: cluster_nodes.stdout_lines

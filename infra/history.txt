@@ -1,0 +1,49 @@
+1.  ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/bootstrap.yml
+2.  ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/bootstrap.yml -K
+3.  ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/containerd.yml -K
+4.  ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/kubernetes-packages.yml -K
+5.  ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/ha.yml -K
+6.  ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/haproxy.yml -K
+7.  ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/keepalived.yml -K
+8.  ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/containerd-registry.yml -K
+9.  ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/kubernetes-init.yml --syntax-check
+10. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/kubernetes-reset.yml --syntax-check
+11. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/kubernetes-reset.yml -K
+12. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/kubernetes-init.yml -K
+13. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/kubernetes-cni.yml --syntax-check
+14. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/kubernetes-cni.yml -K
+15. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/bootstrap.yml --limit k8s-1 -K
+16. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/kubernetes-join.yml --syntax-check
+17. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/kubernetes-join.yml -K
+18. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/kubernetes-api-bind.yml --syntax-check
+19. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/kubernetes-api-bind.yml -K
+20. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/docker.yml -K
+21. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/remove-old-ha.yml -K
+22. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/lb-keepalived.yml -K
+23. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/lb-haproxy.yml -K
+24. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/lb-dns.yml -K
+25. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/helm.yml
+26. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/helm.yml -k
+27. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/helm.yml -K
+28. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/ingress-nginx.yml -K
+29. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/containerd-registry.yml -K
+30. ansible-playbook -i ansible/inventory/production/hosts.ini ansible/playbooks/haproxy.yml -K
+31. ansible-playbook -i inventory/production/hosts.ini playbooks/longhorn-prerequisites.yml
+32. ansible-playbook -i inventory/production/hosts.ini playbooks/longhorn-prerequisites.yml -K
+33. ansible-playbook -i inventory/production/hosts.ini playbooks/install-longhorn.yml
+34. ansible-playbook -i inventory/production/hosts.ini playbooks/install-longhorn.yml -K
+35. ansible-playbook -i inventory/production/hosts.ini playbooks/cloudnativepg.yml --syntax-check
+36. ansible-playbook -i inventory/production/hosts.ini playbooks/cloudnativepg.yml -K
+37. ansible-playbook -i inventory/production/hosts.ini playbooks/postgresql.yml -K
+38. ansible-playbook -i inventory/production/hosts.ini playbooks/kubernetes-python.yml -K
+39. ansible-playbook -i inventory/production/hosts.ini playbooks/postgresql-pooler.yml -K
+40. ansible-playbook -i inventory/production/hosts.ini playbooks/redis.yml -K
+41. ansible-playbook -i infra/ansible/inventory/production/hosts.yml infra/ansible/playbooks/00-bootstrap/00-ssh.yml -k
+42. ansible-playbook -i infra/ansible/inventory/production/hosts.yml infra/ansible/playbooks/00-bootstrap/01-system.yml
+43. ansible-playbook -i infra/ansible/inventory/production/hosts.yml infra/ansible/playbooks/00-bootstrap/01-system.yml -K
+44. ansible-playbook -i infra/ansible/inventory/production/hosts.yml infra/ansible/playbooks/01-container.yml -K
+45. ansible-playbook -i infra/ansible/inventory/production/hosts.yml infra/ansible/playbooks/02-kubernetes/00-prerequisites.yml -K
+46. ansible-playbook -i infra/ansible/inventory/production/hosts.yml infra/ansible/playbooks/03-high-availability/00-docker.yml -K
+47. ansible-playbook -i infra/ansible/inventory/production/hosts.yml infra/ansible/playbooks/00-bootstrap/00-ssh.yml -k
+48. ansible-playbook -i infra/ansible/inventory/production/hosts.yml infra/ansible/playbooks/03-high-availability/01-haproxy.yml --syntax-check
+49. ansible-playbook -i infra/ansible/inventory/production/hosts.yml infra/ansible/playbooks/03-high-availability/01-haproxy.yml -K

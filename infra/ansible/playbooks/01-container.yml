@@ -1,0 +1,26 @@
+---
+# 01-container.yml
+# Master Playbook for container runtime configuration.
+#
+# Purpose:
+# Prepare all Kubernetes nodes with the container runtime
+# required by Kubernetes.
+#
+# Execution order:
+# 1. Install and configure containerd
+#
+# HAProxy is excluded because it runs separately with Docker Compose.
+
+# ============================================================
+# STEP 1 - Containerd
+# ============================================================
+# Install containerd and configure it for Kubernetes.
+#
+# This step:
+# - Installs containerd
+# - Generates the containerd configuration
+# - Enables systemd cgroups
+# - Enables and starts the containerd service
+
+- name: "STEP 1 - Install and configure containerd"
+  ansible.builtin.import_playbook: 01-container/00-containerd.yml
