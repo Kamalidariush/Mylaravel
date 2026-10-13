@@ -128,3 +128,7 @@ storage:
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# 11 - Configure the Laravel application health endpoint.
+healthCheck:
+  path: /up

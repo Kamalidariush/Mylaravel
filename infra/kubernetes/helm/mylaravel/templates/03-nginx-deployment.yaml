@@ -47,21 +47,21 @@ spec:
           # 06 - Check whether Nginx accepts HTTP connections.
           startupProbe:
             httpGet:
-              path: /
+              path: {{ .Values.healthCheck.path }}
               port: http
             periodSeconds: 5
             failureThreshold: 30
 
           readinessProbe:
             httpGet:
-              path: /
+              path: {{ .Values.healthCheck.path }}
               port: http
             periodSeconds: 10
             failureThreshold: 3
 
           livenessProbe:
             httpGet:
-              path: /
+              path: {{ .Values.healthCheck.path }}
               port: http
             periodSeconds: 20
             failureThreshold: 3
