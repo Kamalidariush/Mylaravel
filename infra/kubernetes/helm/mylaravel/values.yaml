@@ -75,9 +75,9 @@ service:
 # 07 - Configure Ingress-NGINX integration.
 # Keep disabled until the application Deployment is verified.
 ingress:
-  enabled: false
+  enabled: true
   className: nginx
-  host: laravel.example.com
+  host: 192.168.1.101
 
   tls:
     enabled: false
