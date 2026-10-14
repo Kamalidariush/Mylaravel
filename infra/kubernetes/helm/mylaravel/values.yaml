@@ -77,7 +77,7 @@ service:
 ingress:
   enabled: true
   className: nginx
-  host: 192.168.1.101
+  host: h.rayanenergy.co
 
   tls:
     enabled: false
