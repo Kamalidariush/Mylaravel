@@ -1,7 +1,9 @@
-
 # 03 - Deploy Nginx as the HTTP frontend for Laravel.
+# File: infra/kubernetes/helm/mylaravel/templates/03-nginx-deployment.yaml
+
 apiVersion: apps/v1
 kind: Deployment
+
 metadata:
   name: {{ include "mylaravel.fullname" . }}-nginx
   labels:
@@ -70,7 +72,23 @@ spec:
           resources:
             {{- toYaml .Values.resources.nginx | nindent 12 }}
 
-      # 08 - Apply optional node scheduling rules.
+          # 08 - Mount the Kubernetes-specific Nginx configuration.
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+
+      # 09 - Provide the Nginx configuration from the ConfigMap.
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: {{ include "mylaravel.fullname" . }}-nginx-config
+            items:
+              - key: default.conf
+                path: default.conf
+
+      # 10 - Apply optional node scheduling rules.
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
