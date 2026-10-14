@@ -28,6 +28,9 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      # -----------------------------------------------------
+      # Validate image SHA
+      # -----------------------------------------------------
       - name: Validate image SHA
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
@@ -39,12 +42,18 @@ jobs:
             exit 1
           fi
 
+      # -----------------------------------------------------
+      # Checkout production chart from main
+      # -----------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: main
 
-      - name: Verify successful Build for the same SHA
+      # -----------------------------------------------------
+      # Verify successful CI and Build for the same SHA
+      # -----------------------------------------------------
+      - name: Verify successful CI and Build for the same SHA
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
@@ -52,12 +61,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          RESPONSE="$(curl --fail --silent --show-error \
+          API="https://api.github.com/repos/$GH_REPOSITORY/actions"
+
+          # CI must have passed on main for this exact commit.
+          CI_RESPONSE="$(curl --fail --silent --show-error \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/build.yml/runs?head_sha=$IMAGE_TAG&per_page=100")"
+            "$API/workflows/ci.yml/runs?head_sha=$IMAGE_TAG&per_page=100")"
 
-          MATCH="$(jq --arg sha "$IMAGE_TAG" '
+          CI_MATCH="$(jq --arg sha "$IMAGE_TAG" '
             [.workflow_runs[]
               | select(
                   .head_sha == $sha
@@ -66,14 +78,43 @@ jobs:
                   and .conclusion == "success"
                 )
             ] | length
-          ' <<< "$RESPONSE")"
+          ' <<< "$CI_RESPONSE")"
 
-          if [[ "$MATCH" -lt 1 ]]; then
-            echo "No successful Build run found for this SHA on main."
+          if [[ "$CI_MATCH" -lt 1 ]]; then
+            echo "No successful CI push run found for this SHA on main."
             exit 1
           fi
 
+          # Build is triggered by workflow_run after successful CI.
+          BUILD_RESPONSE="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$API/workflows/build.yml/runs?head_sha=$IMAGE_TAG&per_page=100")"
+
+          BUILD_MATCH="$(jq --arg sha "$IMAGE_TAG" '
+            [.workflow_runs[]
+              | select(
+                  .head_sha == $sha
+                  and .head_branch == "main"
+                  and .event == "workflow_run"
+                  and .conclusion == "success"
+                )
+            ] | length
+          ' <<< "$BUILD_RESPONSE")"
+
+          if [[ "$BUILD_MATCH" -lt 1 ]]; then
+            echo "No successful Build workflow_run found for this SHA on main."
+            exit 1
+          fi
+
+          echo "Successful CI and Build verified for $IMAGE_TAG."
+
+      # -----------------------------------------------------
+      # Validate Helm chart and rendered image references
+      # -----------------------------------------------------
       - name: Validate Helm chart
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
           set -euo pipefail
 
@@ -82,19 +123,33 @@ jobs:
           helm template mylaravel \
             infra/kubernetes/helm/mylaravel \
             --namespace production \
-            --set-string image.app.tag="${{ inputs.image_tag }}" \
-            --set-string image.nginx.tag="${{ inputs.image_tag }}" \
+            --set-string image.app.tag="$IMAGE_TAG" \
+            --set-string image.nginx.tag="$IMAGE_TAG" \
             > rendered-production.yaml
 
-          grep -q 'image: ghcr.io/kamalidariush/mylaravel:${{ inputs.image_tag }}' rendered-production.yaml
-          grep -q 'image: ghcr.io/kamalidariush/mylaravel-nginx:${{ inputs.image_tag }}' rendered-production.yaml
+          grep -Fq \
+            "image: ghcr.io/kamalidariush/mylaravel:${IMAGE_TAG}" \
+            rendered-production.yaml
 
+          grep -Fq \
+            "image: ghcr.io/kamalidariush/mylaravel-nginx:${IMAGE_TAG}" \
+            rendered-production.yaml
+
+          echo "Helm chart validation succeeded."
+
+      # -----------------------------------------------------
+      # Package Helm chart
+      # -----------------------------------------------------
       - name: Package Helm chart
         run: |
           set -euo pipefail
+
           tar -czf mylaravel-chart.tar.gz \
             -C infra/kubernetes/helm mylaravel
 
+      # -----------------------------------------------------
+      # Copy chart to production VPS
+      # -----------------------------------------------------
       - name: Copy chart to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -105,6 +160,9 @@ jobs:
           source: mylaravel-chart.tar.gz
           target: /tmp/
 
+      # -----------------------------------------------------
+      # Deploy, verify health, and rollback on failure
+      # -----------------------------------------------------
       - name: Deploy, verify health and rollback on failure
         uses: appleboy/ssh-action@v1.2.0
         env:
@@ -126,24 +184,27 @@ jobs:
             command -v curl
             command -v jq
             test -f "$KUBECONFIG"
-            # Verify namespace-scoped deployment permissions.
+
+            # Verify namespace-scoped permissions.
             test "$(kubectl auth can-i get deployments -n production)" = "yes"
             test "$(kubectl auth can-i create deployments -n production)" = "yes"
             test "$(kubectl auth can-i create services -n production)" = "yes"
             test "$(kubectl auth can-i create configmaps -n production)" = "yes"
 
-            # Helm uses Secrets to store release information.
+            # Helm stores release history in Kubernetes Secrets.
             test "$(kubectl auth can-i get secrets -n production)" = "yes"
             test "$(kubectl auth can-i list secrets -n production)" = "yes"
             test "$(kubectl auth can-i create secrets -n production)" = "yes"
             test "$(kubectl auth can-i update secrets -n production)" = "yes"
             test "$(kubectl auth can-i delete secrets -n production)" = "yes"
+
             WORKDIR="/tmp/mylaravel-production-${IMAGE_TAG}"
             mkdir -p "$WORKDIR"
             tar -xzf /tmp/mylaravel-chart.tar.gz -C "$WORKDIR"
 
             CHART="$WORKDIR/mylaravel"
 
+            # Capture the currently deployed revision for health-check rollback.
             PREVIOUS_REVISION=""
             if helm status mylaravel -n production >/dev/null 2>&1; then
               PREVIOUS_REVISION="$(
@@ -153,25 +214,34 @@ jobs:
             fi
 
             collect_diagnostics() {
-              echo "=== Deployments ==="
+              echo "=== Deployments, Pods and Services ==="
               kubectl get deployments,pods,services -n production || true
-              echo "=== Recent events ==="
+
+              echo "=== Recent Events ==="
               kubectl get events -n production \
                 --sort-by=.metadata.creationTimestamp | tail -n 60 || true
-              echo "=== Application logs ==="
+
+              echo "=== Application Logs ==="
               kubectl logs deployment/mylaravel-app \
                 -n production --all-containers --tail=100 || true
+
+              echo "=== NGINX Logs ==="
               kubectl logs deployment/mylaravel-nginx \
                 -n production --all-containers --tail=100 || true
             }
 
+            # --atomic automatically rolls back a failed Helm upgrade.
             helm upgrade --install mylaravel "$CHART" \
               --namespace production \
               --set-string image.app.tag="$IMAGE_TAG" \
               --set-string image.nginx.tag="$IMAGE_TAG" \
               --wait \
               --atomic \
-              --timeout 10m
+              --timeout 10m || {
+                echo "Helm upgrade failed."
+                collect_diagnostics
+                exit 1
+              }
 
             if ! kubectl rollout status deployment/mylaravel-app \
                 -n production --timeout=5m; then
@@ -185,7 +255,7 @@ jobs:
               exit 1
             fi
 
-            # Check the application through the internal Nginx Service.
+            # Check the application through the internal NGINX Service.
             kubectl port-forward \
               -n production service/mylaravel-nginx \
               18080:80 > /tmp/mylaravel-port-forward.log 2>&1 &
@@ -195,16 +265,19 @@ jobs:
               kill "$PF_PID" 2>/dev/null || true
               wait "$PF_PID" 2>/dev/null || true
             }
+
             trap cleanup_port_forward EXIT
 
             HEALTHY=false
+
             for attempt in $(seq 1 30); do
               if ! kill -0 "$PF_PID" 2>/dev/null; then
                 break
               fi
 
               if curl --fail --silent --show-error \
-                  --max-time 3 http://127.0.0.1:18080/up \
+                  --max-time 3 \
+                  http://127.0.0.1:18080/up \
                   -o /dev/null; then
                 HEALTHY=true
                 break
@@ -221,12 +294,22 @@ jobs:
               cleanup_port_forward
               trap - EXIT
 
+              # Restore the previous Helm revision when one exists.
               if [[ -n "$PREVIOUS_REVISION" ]]; then
-                helm rollback mylaravel "$PREVIOUS_REVISION" \
-                  --namespace production \
-                  --wait --timeout 10m
+                if ! helm rollback mylaravel "$PREVIOUS_REVISION" \
+                    --namespace production \
+                    --wait --timeout 10m; then
+                  echo "CRITICAL: Helm rollback failed."
+                  collect_diagnostics
+                  exit 1
+                fi
               else
-                helm uninstall mylaravel --namespace production --wait
+                if ! helm uninstall mylaravel \
+                    --namespace production --wait; then
+                  echo "CRITICAL: Helm uninstall after failed initial deployment failed."
+                  collect_diagnostics
+                  exit 1
+                fi
               fi
 
               exit 1
