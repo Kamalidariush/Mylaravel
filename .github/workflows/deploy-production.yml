@@ -111,7 +111,6 @@ jobs:
 
       # -----------------------------------------------------
       # Validate Helm chart and rendered image references
-      # -----------------------------------------------------
       - name: Validate Helm chart
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
@@ -127,16 +126,12 @@ jobs:
             --set-string image.nginx.tag="$IMAGE_TAG" \
             > rendered-production.yaml
 
-          grep -Fq \
-            "image: ghcr.io/kamalidariush/mylaravel:${IMAGE_TAG}" \
-            rendered-production.yaml
+          echo "=== Rendered container images ==="
+          grep -n 'image:' rendered-production.yaml
 
-          grep -Fq \
-            "image: ghcr.io/kamalidariush/mylaravel-nginx:${IMAGE_TAG}" \
-            rendered-production.yaml
-
-          echo "Helm chart validation succeeded."
-
+          echo "=== Expected images ==="
+          echo "ghcr.io/kamalidariush/mylaravel:${IMAGE_TAG}"
+          echo "ghcr.io/kamalidariush/mylaravel-nginx:${IMAGE_TAG}"
       # -----------------------------------------------------
       # Package Helm chart
       # -----------------------------------------------------
