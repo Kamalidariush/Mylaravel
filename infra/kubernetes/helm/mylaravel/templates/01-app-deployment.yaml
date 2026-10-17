@@ -37,6 +37,13 @@ spec:
           # 04 - Use the PHP-FPM image and version configured in values.yaml.
           image: "{{ .Values.image.app.repository }}:{{ .Values.image.app.tag }}"
           imagePullPolicy: {{ .Values.image.app.pullPolicy }}
+          # Run Laravel optimization with runtime environment variables.
+          command: ["sh", "-lc"]
+          args:
+            - |
+              set -e
+              php artisan optimize
+              exec php-fpm
 
           # 05 - Expose PHP-FPM to the internal application Service.
           ports:

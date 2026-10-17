@@ -39,14 +39,13 @@ spec:
           imagePullPolicy: {{ .Values.image.app.pullPolicy }}
 
           # 05 - Start the Laravel queue worker.
-          command: ["php", "artisan"]
+          # Optimize Laravel before starting the queue worker.
+          command: ["sh", "-lc"]
           args:
-            - queue:work
-            - redis
-            - --sleep=3
-            - --tries=3
-            - --timeout=90
-
+            - |
+              set -e
+              php artisan optimize
+              exec php artisan queue:work redis --sleep=3 --tries=3 --timeout=90
           # 06 - Load non-sensitive application configuration.
           envFrom:
             - configMapRef:

@@ -39,8 +39,13 @@ spec:
           imagePullPolicy: {{ .Values.image.app.pullPolicy }}
 
           # 05 - Run Laravel's scheduler continuously.
-          command: ["php", "artisan", "schedule:work"]
-
+          # Optimize Laravel before starting the scheduler.
+          command: ["sh", "-lc"]
+          args:
+            - |
+              set -e
+              php artisan optimize
+              exec php artisan schedule:work
           # 06 - Load non-sensitive application configuration.
           envFrom:
             - configMapRef:

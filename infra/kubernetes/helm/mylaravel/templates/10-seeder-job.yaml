@@ -1,0 +1,72 @@
+{{/*
+File: 10-seeder-job.yaml
+Path: infra/kubernetes/helm/mylaravel/templates/10-seeder-job.yaml
+Purpose: Run database seeders only during initial Helm installation.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "mylaravel.fullname" . }}-seeder
+  labels:
+    {{- include "mylaravel.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install
+    "helm.sh/hook-weight": "-4"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+
+  template:
+    metadata:
+      labels:
+        {{- include "mylaravel.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: seeder
+
+    spec:
+      restartPolicy: Never
+
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        - name: seeder
+          image: "{{ .Values.image.app.repository }}:{{ .Values.image.app.tag }}"
+          imagePullPolicy: {{ .Values.image.app.pullPolicy }}
+
+          command:
+            - php
+            - artisan
+            - db:seed
+            - --force
+
+          env:
+            {{- range $name, $value := .Values.app.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+
+          envFrom:
+            - secretRef:
+                name: {{ .Values.app.existingSecret }}
+
+          resources:
+            {{- toYaml .Values.resources.app | nindent 12 }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
