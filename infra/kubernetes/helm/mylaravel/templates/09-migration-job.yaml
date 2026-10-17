@@ -1,0 +1,72 @@
+# File: 09-migration-job.yaml
+# Path: infra/kubernetes/helm/mylaravel/templates/09-migration-job.yaml
+# Purpose: Run Laravel database migrations before Helm install or upgrade.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "mylaravel.fullname" . }}-migration
+  labels:
+    {{- include "mylaravel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+
+  template:
+    metadata:
+      labels:
+        {{- include "mylaravel.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+
+    spec:
+      restartPolicy: Never
+
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        - name: migration
+          image: "{{ .Values.image.app.repository }}:{{ .Values.image.app.tag }}"
+          imagePullPolicy: {{ .Values.image.app.pullPolicy }}
+
+          command:
+            - php
+            - artisan
+            - migrate
+            - --force
+
+          env:
+            {{- range $name, $value := .Values.app.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+
+          envFrom:
+            - secretRef:
+                name: {{ .Values.app.existingSecret }}
+
+          resources:
+            {{- toYaml .Values.resources.app | nindent 12 }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

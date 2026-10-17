@@ -16,6 +16,22 @@ metadata:
   name: production-deployer
   namespace: production
 rules:
+
+
+  # Kubernetes Jobs used by Helm hooks for migrations and seeding.
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+
   # Helm release metadata. Note: this also grants access to Secrets in production.
   - apiGroups: [""]
     resources:
