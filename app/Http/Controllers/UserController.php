@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Storage;
 class UserController extends Controller
 {
     /**
-     * Display a listing of users.
+     * Display a listing of users .
      */
     public function index()
     {
