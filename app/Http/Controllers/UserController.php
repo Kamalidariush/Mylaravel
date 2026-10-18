@@ -149,7 +149,7 @@ class UserController extends Controller
         if ($request->hasFile('file')) {
 
             if ($user->file_path) {
-                Storage::disk('local')->delete($user->file_path);
+                Storage::delete($user->file_path);
             }
 
             $filePath = $request->file('file')->store(
@@ -225,13 +225,11 @@ class UserController extends Controller
         if (!$user->file_path) {
             abort(404);
         }
-
-        $disk = Storage::disk('s3');
-
-        if (!$disk->exists($user->file_path)) {
+        if (!Storage::exists($user->file_path)) {
             abort(404);
         }
 
-        return $disk->download($user->file_path);
+        return Storage::download($user->file_path);
+
     }
 }
