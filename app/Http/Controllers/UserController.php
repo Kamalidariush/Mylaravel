@@ -226,10 +226,12 @@ class UserController extends Controller
             abort(404);
         }
 
-        if (!Storage::disk('local')->exists($user->file_path)) {
+        $disk = Storage::disk('s3');
+
+        if (!$disk->exists($user->file_path)) {
             abort(404);
         }
 
-        return Storage::disk('local')->download($user->file_path);
+        return $disk->download($user->file_path);
     }
 }
