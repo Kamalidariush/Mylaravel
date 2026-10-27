@@ -1,0 +1,63 @@
+# 11-00 - Monitoring Helm values.
+# Path:
+#   infra/kubernetes/helm/monitoring/kube-prometheus-stack/values.yaml
+#
+# Purpose:
+#   Configure kube-prometheus-stack for the production cluster.
+#
+# Storage:
+#   Longhorn
+#
+# Retention:
+#   7 days
+
+grafana:
+  enabled: true
+
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - grafana.rayanenergy.co
+    path: /
+    annotations:
+      nginx.ingress.kubernetes.io/whitelist-source-range: "192.168.1.0/24"
+
+  persistence:
+    enabled: true
+    storageClassName: longhorn
+    accessModes:
+      - ReadWriteOnce
+    size: 2Gi
+
+  # Do not store Grafana credentials in this file.
+  # Configure an existing Kubernetes Secret before deployment.
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+
+prometheus:
+  enabled: true
+
+  prometheusSpec:
+    retention: 7d
+    retentionSize: 1GB
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 2Gi
+
+alertmanager:
+  enabled: true
+# Use Huawei mirror because registry.k8s.io is blocked.
+kube-state-metrics:
+  image:
+    registry: swr.cn-north-4.myhuaweicloud.com
+    repository: ddn-k8s/registry.k8s.io/kube-state-metrics/kube-state-metrics

@@ -1,0 +1,63 @@
+# Path: infra/ansible/playbooks/11-monitoring/files/11-04-platform-monitors-rbac.yml
+# Purpose: Namespace-scoped RBAC for the platform-monitors Helm release.
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform-monitors
+  labels:
+    app.kubernetes.io/part-of: monitoring
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: platform-monitors-release-manager
+  namespace: platform-monitors
+rules:
+  # Helm release records are isolated in this dedicated namespace.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-monitors-release-manager
+  namespace: platform-monitors
+subjects:
+  - kind: ServiceAccount
+    name: production-deployer
+    namespace: production
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: platform-monitors-release-manager
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: platform-monitors-servicemonitor-manager
+  namespace: longhorn-system
+rules:
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["servicemonitors"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-monitors-servicemonitor-manager
+  namespace: longhorn-system
+subjects:
+  - kind: ServiceAccount
+    name: production-deployer
+    namespace: production
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: platform-monitors-servicemonitor-manager

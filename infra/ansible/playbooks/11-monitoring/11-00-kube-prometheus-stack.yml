@@ -1,0 +1,128 @@
+---
+# 11-00-kube-prometheus-stack.yml
+# Path: infra/ansible/playbooks/11-monitoring/11-00-kube-prometheus-stack.yml
+# Purpose: Deploy kube-prometheus-stack using Helm and Vault-managed
+#          Grafana credentials. Helm creates the monitoring namespace.
+
+- name: "Monitoring | Deploy kube-prometheus-stack"
+  hosts: k8s-1
+  become: false
+  gather_facts: false
+
+  vars_files:
+    - ../10-application/vars/10-00-01-runtime-secrets.vault.yml
+
+  vars:
+    monitoring_namespace: monitoring
+    monitoring_release: kube-prometheus-stack
+    monitoring_chart_version: "92.10.1"
+    monitoring_values_source: ../../../kubernetes/helm/monitoring/kube-prometheus-stack/values.yaml
+    monitoring_values_remote: /tmp/kube-prometheus-stack-values.yaml
+
+  tasks:
+    - name: "Monitoring | Validate Grafana credentials"
+      ansible.builtin.assert:
+        that:
+          - grafana_admin_user is defined
+          - grafana_admin_user | length > 0
+          - grafana_admin_password is defined
+          - grafana_admin_password | length >= 16
+        fail_msg: "Grafana credentials must be configured in Ansible Vault."
+      no_log: true
+
+    - name: "Monitoring | Copy Helm values"
+      ansible.builtin.copy:
+        src: "{{ monitoring_values_source }}"
+        dest: "{{ monitoring_values_remote }}"
+        owner: rayan
+        group: rayan
+        mode: "0600"
+
+    - name: "Monitoring | Add Prometheus Community Helm repository"
+      ansible.builtin.command:
+        argv:
+          - helm
+          - repo
+          - add
+          - prometheus-community
+          - https://prometheus-community.github.io/helm-charts
+          - --force-update
+      changed_when: true
+
+    - name: "Monitoring | Update Helm repository"
+      ansible.builtin.command:
+        argv:
+          - helm
+          - repo
+          - update
+          - prometheus-community
+      changed_when: true
+
+    - name: "Monitoring | Bootstrap release and create namespace"
+      ansible.builtin.command:
+        argv:
+          - helm
+          - upgrade
+          - --install
+          - "{{ monitoring_release }}"
+          - prometheus-community/kube-prometheus-stack
+          - --version
+          - "{{ monitoring_chart_version }}"
+          - --namespace
+          - "{{ monitoring_namespace }}"
+          - --create-namespace
+          - --values
+          - "{{ monitoring_values_remote }}"
+          - --set
+          - grafana.enabled=false
+      register: monitoring_bootstrap
+      changed_when: >-
+        'has been upgraded' in monitoring_bootstrap.stdout or
+        'has been installed' in monitoring_bootstrap.stdout
+
+    - name: "Monitoring | Apply Grafana admin Secret"
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl -n "{{ monitoring_namespace }}" create secret generic grafana-admin \
+          --from-literal=admin-user="$GRAFANA_ADMIN_USER" \
+          --from-literal=admin-password="$GRAFANA_ADMIN_PASSWORD" \
+          --dry-run=client -o yaml |
+        kubectl apply -f -
+      args:
+        executable: /bin/bash
+      environment:
+        GRAFANA_ADMIN_USER: "{{ grafana_admin_user }}"
+        GRAFANA_ADMIN_PASSWORD: "{{ grafana_admin_password }}"
+      no_log: true
+      register: grafana_secret_result
+      changed_when: >-
+        'created' in grafana_secret_result.stdout or
+        'configured' in grafana_secret_result.stdout
+
+    - name: "Monitoring | Enable Grafana and reconcile the release"
+      ansible.builtin.command:
+        argv:
+          - helm
+          - upgrade
+          - --install
+          - "{{ monitoring_release }}"
+          - prometheus-community/kube-prometheus-stack
+          - --version
+          - "{{ monitoring_chart_version }}"
+          - --namespace
+          - "{{ monitoring_namespace }}"
+          - --create-namespace
+          - --values
+          - "{{ monitoring_values_remote }}"
+          - --wait
+          - --timeout
+          - 10m
+      register: monitoring_install
+      changed_when: >-
+        'has been upgraded' in monitoring_install.stdout or
+        'has been installed' in monitoring_install.stdout
+
+    - name: "Monitoring | Remove temporary Helm values"
+      ansible.builtin.file:
+        path: "{{ monitoring_values_remote }}"
+        state: absent
