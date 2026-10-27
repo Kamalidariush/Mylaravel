@@ -94,19 +94,25 @@
 
     - name: "Longhorn | Install or upgrade Longhorn"
       ansible.builtin.command:
-        cmd: >
+        cmd: >-
           helm upgrade --install longhorn longhorn/longhorn
           --namespace longhorn-system
           --create-namespace
+          --version 1.13.0
           --set defaultSettings.defaultReplicaCount=3
+          --set-json 'networkPolicies.metricsScrapeSources=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"monitoring"}},"podSelector":{"matchLabels":{"app.kubernetes.io/name":"prometheus","app.kubernetes.io/instance":"kube-prometheus-stack-prometheus"}}}]'
           --wait
           --timeout 15m
 
-    - name: "Longhorn | Wait for Longhorn pods"
+    - name: "Longhorn | Wait for core workloads"
       ansible.builtin.command:
-        cmd: >
-          kubectl -n longhorn-system
-          wait --for=condition=Ready pod
-          --all
+        cmd: >-
+          kubectl -n longhorn-system rollout status {{ item.kind }}/{{ item.name }}
           --timeout=15m
+      loop:
+        - { kind: deployment, name: longhorn-ui }
+        - { kind: deployment, name: longhorn-driver-deployer }
+        - { kind: deployment, name: longhorn-global-manager }
+        - { kind: daemonset, name: longhorn-manager }
+        - { kind: daemonset, name: longhorn-csi-plugin }
       changed_when: false

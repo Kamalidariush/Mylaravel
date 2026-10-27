@@ -141,6 +141,10 @@
           --create-namespace
           --set controller.replicaCount=3
 
+          --set controller.metrics.enabled=true
+          --set controller.metrics.serviceMonitor.enabled=true
+          --set-string controller.metrics.serviceMonitor.additionalLabels.release=kube-prometheus-stack
+
           --set controller.service.type=NodePort
           --set controller.service.nodePorts.http={{ ingress_http_nodeport }}
           --set controller.service.nodePorts.https={{ ingress_https_nodeport }}
