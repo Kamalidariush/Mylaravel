@@ -9,8 +9,7 @@
 [![Prometheus](https://img.shields.io/badge/Monitoring-Prometheus-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io/)
 [![Grafana](https://img.shields.io/badge/Observability-Grafana-F46800?logo=grafana&logoColor=white)](https://grafana.com/)
 
-**A Laravel-based application with a containerized development environment and an infrastructure automation foundation for cloud-native deployment.**
-
+**A Laravel application backed by a fully automated DevOps workflow, designed to manage two deployment environments — Staging and Production — using Docker Compose and Kubernetes. The project integrates GitHub Actions, Docker, Ansible, and Kubernetes to automate application validation, container builds, infrastructure configuration, deployment, and operational monitoring. It provides a consistent path from code changes to production releases, with environment-specific deployment strategies and centralized observability.**
 ---
 
 ## Table of Contents
