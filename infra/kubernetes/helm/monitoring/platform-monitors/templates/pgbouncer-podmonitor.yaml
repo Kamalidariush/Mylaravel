@@ -1,0 +1,23 @@
+# Path: infra/kubernetes/helm/monitoring/platform-monitors/templates/pgbouncer-podmonitor.yaml
+{{- if .Values.pgbouncer.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: pgbouncer
+  namespace: database
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - database
+  selector:
+    matchLabels:
+      cnpg.io/poolerName: postgres-pgbouncer
+  podMetricsEndpoints:
+    - portNumber: 9127
+      path: /metrics
+      scheme: http
+      interval: 30s
+      scrapeTimeout: 10s
+{{- end }}

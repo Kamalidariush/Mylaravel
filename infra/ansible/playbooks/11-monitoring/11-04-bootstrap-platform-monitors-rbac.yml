@@ -1,0 +1,58 @@
+---
+# Path: infra/ansible/playbooks/11-monitoring/11-04-bootstrap-platform-monitors-rbac.yml
+# Purpose: Bootstrap RBAC using the trusted administrative identity on k8s-1.
+# WARNING: Bootstrap only. Do not run this playbook from the ordinary deployment Runner.
+
+- name: "Monitoring | Bootstrap platform-monitors RBAC"
+  hosts: k8s-1
+  become: false
+  gather_facts: false
+
+  vars:
+    rbac_source: "{{ playbook_dir }}/files/11-04-platform-monitors-rbac.yml"
+    rbac_remote: /tmp/11-04-platform-monitors-rbac.yml
+
+  tasks:
+    - name: "Monitoring | Identify bootstrap Kubernetes identity"
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - auth
+          - whoami
+      register: bootstrap_identity
+      changed_when: false
+
+    - name: "Monitoring | Require trusted administrative identity"
+      ansible.builtin.assert:
+        that:
+          - "'kubernetes-admin' in bootstrap_identity.stdout"
+        fail_msg: >-
+          Refusing bootstrap: kubectl on k8s-1 is not using the expected
+          kubernetes-admin identity. No RBAC resources were applied.
+
+    - name: "Monitoring | Copy platform-monitors RBAC manifest"
+      ansible.builtin.copy:
+        src: "{{ rbac_source }}"
+        dest: "{{ rbac_remote }}"
+        mode: "0600"
+
+    - name: "Monitoring | Apply platform-monitors RBAC"
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - apply
+          - --filename
+          - "{{ rbac_remote }}"
+      register: rbac_apply
+      changed_when: >-
+        'created' in rbac_apply.stdout or
+        'configured' in rbac_apply.stdout
+
+    - name: "Monitoring | Show RBAC apply result"
+      ansible.builtin.debug:
+        var: rbac_apply.stdout_lines
+
+    - name: "Monitoring | Remove temporary RBAC manifest"
+      ansible.builtin.file:
+        path: "{{ rbac_remote }}"
+        state: absent

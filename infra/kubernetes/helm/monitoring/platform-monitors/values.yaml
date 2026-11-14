@@ -1,0 +1,13 @@
+# Path: infra/kubernetes/helm/monitoring/platform-monitors/values.yaml
+
+commonLabels:
+  release: kube-prometheus-stack
+
+longhorn:
+  enabled: true
+
+postgres:
+  enabled: true
+
+pgbouncer:
+  enabled: true

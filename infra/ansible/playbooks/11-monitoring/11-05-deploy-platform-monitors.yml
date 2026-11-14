@@ -1,0 +1,122 @@
+---
+# Path: infra/ansible/playbooks/11-monitoring/11-05-deploy-platform-monitors.yml
+# Purpose: Deploy platform-monitors through Helm using the production deployer kubeconfig.
+# Run from vps1. Bootstrap RBAC separately with 11-04 when required.
+
+- name: "Monitoring | Deploy platform monitors with Helm"
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+
+  vars:
+    monitoring_kubeconfig: "{{ lookup('env', 'HOME') }}/.kube/production-config"
+    monitoring_context: production-deployer@production-cluster
+    platform_monitors_release: platform-monitors
+    platform_monitors_namespace: platform-monitors
+    platform_monitors_chart: "{{ playbook_dir }}/../../../kubernetes/helm/monitoring/platform-monitors"
+
+  tasks:
+    - name: "Monitoring | Require production kubeconfig"
+      ansible.builtin.stat:
+        path: "{{ monitoring_kubeconfig }}"
+      register: monitoring_kubeconfig_stat
+
+    - name: "Monitoring | Validate kubeconfig exists"
+      ansible.builtin.assert:
+        that:
+          - monitoring_kubeconfig_stat.stat.exists
+          - monitoring_kubeconfig_stat.stat.isreg
+        fail_msg: "Production deployer kubeconfig was not found on vps1."
+
+    - name: "Monitoring | Identify current Kubernetes context"
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - config
+          - current-context
+      environment:
+        KUBECONFIG: "{{ monitoring_kubeconfig }}"
+      register: monitoring_current_context
+      changed_when: false
+
+    - name: "Monitoring | Require production context"
+      ansible.builtin.assert:
+        that:
+          - monitoring_current_context.stdout == monitoring_context
+        fail_msg: >-
+          Refusing deployment: expected Kubernetes context
+          {{ monitoring_context }} but found
+          {{ monitoring_current_context.stdout }}.
+
+    - name: "Monitoring | Identify Kubernetes user"
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - auth
+          - whoami
+      environment:
+        KUBECONFIG: "{{ monitoring_kubeconfig }}"
+      register: monitoring_identity
+      changed_when: false
+
+    - name: "Monitoring | Require production-deployer identity"
+      ansible.builtin.assert:
+        that:
+          - "'system:serviceaccount:production:production-deployer' in monitoring_identity.stdout"
+        fail_msg: >-
+          Refusing deployment: the active Kubernetes identity is not
+          production-deployer.
+
+    - name: "Monitoring | Lint Helm chart"
+      ansible.builtin.command:
+        argv:
+          - helm
+          - lint
+          - "{{ platform_monitors_chart }}"
+      register: platform_monitors_lint
+      changed_when: false
+
+    - name: "Monitoring | Deploy or upgrade Helm release"
+      ansible.builtin.command:
+        argv:
+          - helm
+          - upgrade
+          - --install
+          - "{{ platform_monitors_release }}"
+          - "{{ platform_monitors_chart }}"
+          - --kubeconfig
+          - "{{ monitoring_kubeconfig }}"
+          - --kube-context
+          - "{{ monitoring_context }}"
+          - --namespace
+          - "{{ platform_monitors_namespace }}"
+          - --wait
+          - --timeout
+          - 5m
+      register: platform_monitors_deploy
+      changed_when: >-
+        'has been upgraded' in platform_monitors_deploy.stdout or
+        'has been installed' in platform_monitors_deploy.stdout
+
+    - name: "Monitoring | Verify Helm release status"
+      ansible.builtin.command:
+        argv:
+          - helm
+          - status
+          - "{{ platform_monitors_release }}"
+          - --kubeconfig
+          - "{{ monitoring_kubeconfig }}"
+          - --kube-context
+          - "{{ monitoring_context }}"
+          - --namespace
+          - "{{ platform_monitors_namespace }}"
+      register: platform_monitors_status
+      changed_when: false
+
+    - name: "Monitoring | Show deployment result"
+      ansible.builtin.debug:
+        msg:
+          - "{{ platform_monitors_lint.stdout_lines }}"
+          - "{{ platform_monitors_deploy.stdout_lines }}"
+          - "{{ platform_monitors_status.stdout_lines }}"

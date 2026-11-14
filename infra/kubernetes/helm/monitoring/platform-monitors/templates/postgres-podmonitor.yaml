@@ -1,0 +1,24 @@
+# Path: infra/kubernetes/helm/monitoring/platform-monitors/templates/postgres-podmonitor.yaml
+{{- if .Values.postgres.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: postgres
+  namespace: database
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - database
+  selector:
+    matchLabels:
+      cnpg.io/cluster: postgres
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - portNumber: 9187
+      path: /metrics
+      scheme: http
+      interval: 30s
+      scrapeTimeout: 10s
+{{- end }}

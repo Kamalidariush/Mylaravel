@@ -98,9 +98,18 @@
             master:
               replicas: 3
               volumeSizeLimitMB: 1024
+              config: |
+                [master.volume_growth]
+                copy_1 = 1
+                copy_2 = 1
+                copy_3 = 1
+                copy_other = 1
+                threshold = 0.9
+                disable = false
 
             volume:
               replicas: 1
+              maxVolumeCounts: 10
               storageClassName: {{ seaweedfs_storage_class }}
               requests:
                 storage: {{ seaweedfs_volume_storage }}

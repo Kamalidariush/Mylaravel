@@ -1,0 +1,7 @@
+# Path: infra/kubernetes/helm/monitoring/platform-monitors/Chart.yaml
+apiVersion: v2
+name: platform-monitors
+description: Prometheus monitors for Longhorn and CloudNativePG
+type: application
+version: 0.1.0
+appVersion: "1.0"

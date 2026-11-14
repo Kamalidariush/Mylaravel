@@ -1,0 +1,21 @@
+# Path: infra/kubernetes/helm/monitoring/platform-monitors/templates/longhorn-servicemonitor.yaml
+{{- if .Values.longhorn.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: longhorn
+  namespace: longhorn-system
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - longhorn-system
+  selector:
+    matchLabels:
+      app: longhorn-manager
+  endpoints:
+    - port: manager
+      path: /metrics
+      interval: 30s
+{{- end }}
