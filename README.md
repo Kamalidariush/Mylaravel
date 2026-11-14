@@ -52,7 +52,117 @@ The project follows an automation-oriented approach:
 - Prometheus, Grafana, and OpenTelemetry provide monitoring and observability capabilities.
 
 The goal is to keep application code, infrastructure configuration, and deployment automation version-controlled and maintainable.
+## DevOps Architecture and Deployment Strategy
 
+MyLaravel is designed around an automated DevOps workflow that manages the application lifecycle across two independent environments: **Staging** and **Production**.
+
+Rather than treating deployment as a manual operation, the project integrates source control, continuous integration, containerization, infrastructure automation, and orchestration into a unified delivery process.
+
+### Two-Environment Deployment Model
+
+The project uses different deployment technologies according to the requirements of each environment.
+
+| Environment | Deployment Platform | Primary Purpose |
+|---|---|---|
+| Staging | Docker Compose | Integration testing, pre-production validation, and release verification |
+| Production | Kubernetes | Production workloads, orchestration, availability, and scalable operations |
+
+**Staging — Docker Compose**
+
+The Staging environment provides a containerized environment for validating application changes before production release.
+
+Docker Compose manages the application services and their dependencies, including:
+
+- Laravel / PHP-FPM
+- Nginx
+- PostgreSQL
+- Redis
+- Queue Workers
+- Laravel Scheduler
+
+This environment provides a controlled deployment target for integration testing and release validation.
+
+**Production — Kubernetes**
+
+The Production environment uses Kubernetes to run and manage application workloads.
+
+Kubernetes provides the orchestration layer for:
+
+- Application workload management
+- Service discovery and networking
+- Rolling updates
+- Workload recovery
+- Resource management
+- Persistent storage integration
+- Health checks and availability
+
+Ansible provides the infrastructure automation layer, managing the configuration and deployment operations required by the target environment.
+
+### Automated Delivery Workflow
+
+The delivery process connects GitHub, GitHub Actions, Docker, Ansible, and the deployment platforms.
+
+```mermaid
+flowchart TD
+    DEV[Developer]
+    GIT[GitHub Repository]
+    CI[GitHub Actions]
+    TEST[Code Validation and Tests]
+    BUILD[Docker Image Build]
+    REG[Container Registry]
+
+    DEV --> GIT
+    GIT --> CI
+    CI --> TEST
+    TEST --> BUILD
+    BUILD --> REG
+
+    REG --> STAGE[Staging Deployment]
+    STAGE --> COMPOSE[Docker Compose]
+    COMPOSE --> VALIDATE[Staging Validation]
+
+    VALIDATE --> APPROVAL[Production Release Approval]
+    APPROVAL --> ANSIBLE[Ansible Automation]
+    ANSIBLE --> K8S[Kubernetes Production]
+    K8S --> HEALTH[Deployment Health Verification]
+```
+
+The workflow is organized around the following stages:
+
+1. **Source Control:** Developers commit and push application or infrastructure changes to GitHub.
+2. **Continuous Integration:** GitHub Actions executes the configured validation, dependency, testing, and build jobs.
+3. **Container Build:** Docker packages the application into deployable container images.
+4. **Image Distribution:** Built images are published to the configured container registry.
+5. **Staging Deployment:** The application is deployed to the Staging environment using Docker Compose.
+6. **Release Validation:** The Staging deployment is verified before promoting the release.
+7. **Production Deployment:** Ansible automates the required deployment operations and updates the Kubernetes environment.
+8. **Post-Deployment Verification:** Application and infrastructure health are checked after deployment.
+
+Production deployment should be controlled independently from Staging, with appropriate release approval and environment-specific configuration.
+
+### Infrastructure Automation
+
+Ansible is the automation layer connecting infrastructure configuration and application delivery.
+
+It helps maintain repeatable deployment operations and reduces configuration drift between environments.
+
+Infrastructure automation is maintained in the `infra/` directory.
+
+### Monitoring and Observability
+
+The project includes a dedicated monitoring and observability stack based on Prometheus, Grafana, Alertmanager, OpenTelemetry, and Grafana Tempo.
+
+This provides visibility into application performance, infrastructure resources, container health, database metrics, and distributed traces.
+
+The monitoring architecture supports operational visibility across the application and its supporting services.
+
+### Overall DevOps Objective
+
+The objective is to establish a repeatable and controlled delivery lifecycle:
+
+**Develop → Validate → Build → Deploy to Staging → Verify → Promote → Deploy to Production → Monitor**
+
+This architecture separates pre-production validation from production operations while maintaining a consistent, automated, and version-controlled deployment process.
 ## Key Features
 
 ### Application
